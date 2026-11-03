@@ -1,0 +1,219 @@
+# 每个来源怎么读。一张 PSI sheet 可以由多个来源合并（EURO = 手机 + 平板；Michain = GG + ROLV）。
+#
+# 字段说明
+#   folder        整理下载文件夹时放进 W{周}原始文件/ 下的哪个子文件夹（tools/sort_downloads.py 用）
+#   psi_sheet     写进 PSI 的哪张 sheet
+#   file          文件名正则（不区分大小写），{week} 会替换成周数（允许前导 0）
+#   week_in_path  路径（含文件夹，也含 --inbox 那一层文件夹的名字）里必须能搜到这个正则，文件名里没有周数时用
+#   multiple      true = 匹配到的文件全部读取再合并（GG 和 ROLV 文件名一样）
+#   sheet         sheet 名或序号；找不到这个 sheet 的文件会被跳过
+#   header        表头里一定会出现的几个列名，用来定位表头行
+#   key           {type, column}：type 决定去哪查 PSI 代码
+#                   EAN          69 码 → TTL ID 表 + mapping.xlsx
+#                   TTL_ID       TTL ID 表的 ID 列（Michain 的 Product ID）
+#                   PLAY_SKU / TMO_MATERIAL / PLUS_NAME / ORANGE_NAME → 只查 mapping.xlsx
+#                 fallback：主列查不到（比如 Michain 的 Product ID 写着 Nieznany）时改用这一列
+#   ean_add_6     true = EAN 不以 6 开头就在前面补 6（KTR）
+#   name          产品名列（报告里给人看）
+#   so / stock    销量列 / 库存列（只有其中一个也行），列名里可以写 {week}
+#   include       {column, regex}：只保留匹配的行（品类筛选）
+#   exclude_name  产品名匹配这个正则的行丢掉（手环、手表等）
+#   week_filter   {column, regex}：文件里有多周数据时只取当周
+#   period        文件时间段：{cell_regex}（前 15 行里找两个日期）、{label_from, label_to}（标签右边的格子）
+#                 或 {column}（日期列）。有 period 的来源，时间段对不上当周的候选文件会被跳过
+#   others        false = 这张 sheet 不算 Others（运营商）
+
+EURO_TEL:
+  folder: OM/EURO
+  psi_sheet: EURO
+  file: 'Xiaomi_tele_w?{week}_?\.xlsx'
+  sheet: 0
+  header: ['Kod EAN/UPC', 'Sprzedaż', 'Stan']
+  key: {type: EAN, column: 'Kod EAN/UPC'}
+  name: 'Krótki tekst materiału'
+  so: 'Sprzedaż'
+  stock: 'Stan'
+  exclude_name: 'OPASKA|SMARTWATCH'
+
+EURO_TAB:
+  folder: OM/EURO
+  psi_sheet: EURO
+  file: 'Xiaomi_TAB_W{week}\.xlsx'
+  sheet: 0
+  header: ['Kod EAN/UPC', 'Sprzedaż', 'Stan']
+  key: {type: EAN, column: 'Kod EAN/UPC'}
+  name: 'Krótki tekst materiału'
+  so: 'Sprzedaż'
+  stock: 'Stan'
+  exclude_name: 'OPASKA|SMARTWATCH'
+
+MEX:
+  folder: OM/MEX
+  psi_sheet: MEX
+  file: '.*TERG.*\.xlsx'
+  sheet: Raport
+  header: ['EAN', 'SPRZEDAŻ', 'STAN', 'GRUPA']
+  key: {type: EAN, column: EAN}
+  name: NAZWA
+  so: 'SPRZEDAŻ'
+  stock: STAN
+  include: {column: GRUPA, regex: '^(?:SMARTFONY|TABLETY)$'}
+  period: {label_from: 'Data od:', label_to: 'Data do:'}
+
+MSH:
+  folder: OM/MSH
+  psi_sheet: MSH
+  file: 'Raport Xiaomi.*\.xlsx'
+  week_in_path: 'W{week}(?![0-9])'
+  sheet: Total
+  header: ['EAN', 'Grupa towarowa', 'Ilość', 'Stan magazynowy']
+  key: {type: EAN, column: EAN}
+  name: 'Nazwa art.'
+  so: 'Ilość'
+  stock: 'Stan magazynowy'
+  include: {column: 'Grupa towarowa', regex: 'SMARTFON|TABLETY'}
+  period: {cell_regex: 'Sprzedaż:\s*(\d{4}-\d{2}-\d{2})\s*-\s*(\d{4}-\d{2}-\d{2})'}
+
+X-KOM:
+  folder: OM/X-KOM
+  psi_sheet: X-KOM
+  file: '.*X-KOM_raport_2026_W{week}\.xlsx'
+  sheet: raport
+  header: ['Week', 'EAN', 'SELL_OUT_QTY', 'FINAL_INVENTORY_QTY']
+  key: {type: EAN, column: EAN}
+  name: Name
+  so: SELL_OUT_QTY
+  stock: FINAL_INVENTORY_QTY
+  week_filter: {column: Week, regex: '^2026W0?{week}$'}
+
+KTR:
+  folder: OM/KTR
+  psi_sheet: OM Others
+  file: 'Raport Xiaomi 2026\.Q\d W{week}\.xlsx'
+  sheet: 0
+  header: ['EAN', 'kategoria_nazwa', 'stan W{week}', 'sprzedaż W{week}']
+  key: {type: EAN, column: EAN}
+  ean_add_6: true
+  name: nazwa
+  so: 'sprzedaż W{week}'
+  stock: 'stan W{week}'
+  include: {column: kategoria_nazwa, regex: '^\s*(?:Telefony GSM|Tablety z systemem Android)\s*$'}
+
+MAX:
+  folder: OM/MAX
+  psi_sheet: OM Others
+  file: 'Xiaomi_{week}_2026_GT_Group\.xlsx'
+  sheet: 0
+  header: ['Nazwa', 'EAN', 'Stan magazynowy', 'Sprzedaż']
+  key: {type: EAN, column: EAN}
+  name: Nazwa
+  so: 'Sprzedaż'
+  stock: 'Stan magazynowy'
+  include: {column: Nazwa, regex: '^(?:Smartfon|Tablet)'}
+
+AUCHAN:
+  folder: OM/Auchan
+  psi_sheet: OM Others
+  file: 'Xiaomi T{week} .*\.xlsx'
+  sheet: 0
+  header: ['ILOŚĆ  R', 'Zapas Bieżący Ilość']
+  key: {type: EAN, column: 2}
+  name: 1
+  so: 'ILOŚĆ  R'
+  stock: 'Zapas Bieżący Ilość'
+  include: {column: 1, regex: 'SMARTFON|TABLET'}
+
+MICHAIN_SO:
+  folder: OM/{michain}   # GG 或 ROLV，按文件里的 Customer Name 区分
+  psi_sheet: Michain
+  file: 'SO_collect__Qty\.xlsx'
+  week_in_path: 'W{week}(?![0-9])'
+  multiple: true
+  sheet: 'So Qty'
+  header: ['Product ID', 'Qty', 'E/T']
+  key: {type: TTL_ID, column: 'Product ID'}
+  name: 'Product Name'
+  so: Qty
+  include: {column: 'E/T', regex: '^T$'}
+  period: {column: Date}
+
+MICHAIN_STOCK:
+  folder: OM/{michain}   # GG 或 ROLV，按文件里的 Customer Name 区分
+  psi_sheet: Michain
+  file: 'Stock_collect\.xlsx'
+  week_in_path: 'W{week}(?![0-9])'
+  multiple: true
+  sheet: 0
+  header: ['Product ID', 'Stock QTY', 'E/T']
+  key: {type: TTL_ID, column: 'Product ID', fallback: '69 Code'}
+  name: 'Product Name'
+  stock: 'Stock QTY'
+  include: {column: 'E/T', regex: '^T$'}
+  period: {column: Date}
+
+PLAY:
+  folder: OP/Play
+  psi_sheet: Play
+  file: 'Stock and sales - week {week}\.xlsx'
+  sheet: 1
+  header: ['SKU', 'Model', 'SPRZEDAŻ', 'STOCK']
+  key: {type: PLAY_SKU, column: SKU}
+  name: Model
+  so: 'SPRZEDAŻ'
+  stock: STOCK
+  others: false
+
+TMO:
+  folder: OP/TMO
+  psi_sheet: TMO
+  file: '(W{week} )?kw_cpfr_main_Xiaomi\.xlsx'
+  week_in_path: 'W{week}(?![0-9])'
+  sheet: kw_cpfr_main_Xiaomi
+  header: ['Materiał', 'Opis', 'ZapasTTL', 'WydaniaTTL']
+  key: {type: TMO_MATERIAL, column: 'Materiał'}
+  name: Opis
+  exclude_name: 'DEMO|SAMPLE|Outlet|reSTART'   # 样机（DEMO/SAMPLE）、Outlet、翻新机（reSTART）不计入
+  so: WydaniaTTL
+  stock: ZapasTTL
+  others: false
+
+PLUS:
+  folder: OP/Plus
+  psi_sheet: Plus
+  file: '(W{week} )?Xiaomi_aktualizacja_sprzedaz.*\.xlsx'
+  week_in_path: 'W{week}(?![0-9])'
+  sheet: 0
+  header: ['Model', 'Magazyn + sieć PLK', 'Sprzedaż PLK']
+  key: {type: PLUS_NAME, column: Model}
+  name: Model
+  so: 'Sprzedaż PLK'
+  stock: 'Magazyn + sieć PLK'
+  others: false
+
+ORANGE:
+  folder: OP/Orange
+  psi_sheet: Orange
+  file: 'Zapas_oraz_dystrybucja_XIAOMI_W{week}\.xlsx'
+  sheet: 0
+  header: ['Materiał', 'Nazwa materiału', 'Zapas_CWH', 'Zapas_POS']
+  key: {type: ORANGE_NAME, column: 'Nazwa materiału'}
+  name: 'Nazwa materiału'
+  exclude_name: '^E\.|^SŁUCH'   # E. 开头 = 门店展示机，不计入（2026-11-02 已确认）；SŁUCH = 耳机
+  # 库存 = 中央仓 + 门店 + B2B（和 PSI W39–W41 已核对一致）。
+  # SO 不在这份文件里（Dystrybucja W-1 是上周铺货量），仍用 Jet Wu 给的表
+  stock: [Zapas_CWH, Zapas_POS, Zapas_B2B]
+  others: false
+
+ORANGE_SO:
+  folder: OP/Orange
+  psi_sheet: Orange
+  # Jet Wu 整理的表（周横着排，每周 Delivery / Stock / Sales 三列）。只取 SO；库存用上面的原始文件，两边可以互相核对
+  file: 'OPL_Stock_Sales.*\.xlsx'
+  sheet: Main
+  layout: weekly_columns
+  header: ['Model']
+  key: {type: ORANGE_JET_NAME, column: Model}
+  name: Model
+  so: Sales
+  exclude_name: '^(?:Totals?|Total sales|Other|Xiaomi|Samsung|Apple|Motorola|Honor|Realme|TCL|B2B Export|Buds.*|nan)$'
+  others: false

@@ -1,0 +1,6 @@
+pandas==3.1.0
+openpyxl==3.1.5
+xlrd==2.0.2          # 读 ALSO 的 .xls
+extract-msg==0.58.1  # 读 .msg 邮件附件
+PyYAML==6.0.3
+ipykernel==7.4.0     # 只有用 Jupyter 调试本时需要
