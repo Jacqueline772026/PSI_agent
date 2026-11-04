@@ -116,11 +116,12 @@ AUCHAN:
   psi_sheet: OM Others
   file: 'Xiaomi T{week} .*\.xlsx'
   sheet: 0
-  header: ['ILOŚĆ  R', 'Zapas Bieżący Ilość']
+  header: ['ILOŚĆ  R', 'Zapas Bieżący Ilość', 'Zapas Magazynowy Ilość']
   key: {type: EAN, column: 2}
   name: 1
   so: 'ILOŚĆ  R'
-  stock: 'Zapas Bieżący Ilość'
+  # 库存 = 门店 + 仓库（已确认）
+  stock: ['Zapas Bieżący Ilość', 'Zapas Magazynowy Ilość']
   include: {column: 1, regex: 'SMARTFON|TABLET'}
 
 MICHAIN_SO:

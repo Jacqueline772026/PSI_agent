@@ -216,7 +216,7 @@ ST：OM 的 ST 是 PSI 里的 SUMIFS 公式，从 `2026 DB ST` 按 代码 + KA +
 | X-KOM | ⚠ 待补 | SELL_OUT_QTY | FINAL_INVENTORY_QTY | 文件里有所有周（Week 列，如 2026W40），只取当周 |
 | OM Others：KTR | 域名 komputronik | sprzedaż W{N} | stan W{N} | **EAN 开头少了 6**：`IF(LEFT(EAN,1)="6",EAN,"6"&EAN)`；品类（kategoria_nazwa）只保留 Telefony GSM、Tablety z systemem Android |
 | OM Others：MAX | 域名 gtpoland | Sprzedaż | Stan magazynowy | 三家匹配后合并 |
-| OM Others：Auchan | ⚠ 待补 | | | |
+| OM Others：Auchan | 文件名 `Xiaomi T{N} 日期.xlsx` | ILOŚĆ R | Zapas Bieżący + Zapas Magazynowy（门店 + 仓库） | 2026-11-04 确认相加；历史周用 `tools.auchan_backfill` 补算 |
 | Michain：GG、ROLV | ⚠ 发件人待补 | Qty | stock | 用 Product ID 查代码；筛选 E/T = T；SO 和 stock 分在两张表，汇总时分开贴 |
 
 ## 7. 统一映射表与新品
