@@ -12,6 +12,7 @@ from pathlib import Path
 import pandas as pd
 
 from checks.structure_check import COL_C, COL_E, COL_G, COL_LABEL, OTHERS, is_number, load as load_psi
+from checks.tmo_guard import check_tmo, report_lines
 from psi_tool.db import build_db, compare_db
 from psi_tool.mapping import Mapper, latest_ttl, resolve
 from psi_tool.paths import CONFIG, MAPPING, OUTPUT, PSI_FILE, TTL_DIR
@@ -43,7 +44,7 @@ def map_rows(df, mapper, sheet_codes, projects):
         if cat == "exclude":
             status = "excluded"
         elif code is None:
-            status = "unmatched"
+            status = "excluded" if r.get("drop_unmatched") else "unmatched"
         else:
             code = resolve(code, r["name"], sheet_codes, projects)
             status = "psi" if code in sheet_codes else "others"
@@ -278,6 +279,9 @@ def write_report(path, week, results, tables, comparisons, mapper):
         if len(oth):
             L += ["", "**有代码但 PSI 这张 sheet 没有对应行**（老品正常；新品要考虑加行）", "",
                   md_table(["代码", "SO", "库存"], [[c, int(a), int(b)] for c, a, b in oth.values])]
+        if sheet_name == "TMO":
+            excluded = [p.name_excluded for p in res["parts"] if p.name_excluded is not None]
+            L += report_lines(check_tmo(r, pd.concat(excluded) if excluded else None), md_table)
         cmp = comparisons.get(sheet_name)
         if cmp and cmp[1]:
             L += ["", f"**和 PSI 已填的 W{week} 不一致的格子**", "",

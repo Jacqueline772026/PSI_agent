@@ -54,6 +54,8 @@ def week_from_name(name, folder):
         return iso_week(dt.datetime.strptime(m.group(1), "%Y%m%d").date())
     if m := re.search(r"sprzedaz\s*(\d{4}-\d{2}-\d{2})", n):  # Plus：下周一的日期
         return iso_week(dt.date.fromisoformat(m.group(1)) - dt.timedelta(days=1))
+    if m := re.search(r"Xiaomi_(\d{4}-\d{2}-\d{2})", n):  # Plus 原始文件名：下周一的日期
+        return iso_week(dt.date.fromisoformat(m.group(1)) - dt.timedelta(days=1))
     if m := re.search(r"na dzień_(\d{4}-\d{2}-\d{2})", n):  # MEX：周日的日期
         return iso_week(dt.date.fromisoformat(m.group(1)))
     if folder == "OM/MAX" and (m := re.search(r"Xiaomi_(\d+)_20\d\d", n)):
@@ -92,7 +94,7 @@ class Classifier:
             if src is None:
                 return folder, src  # DB 文件名规则已经足够明确
             c = self.cfg[src]
-            raw = read_sheet(path, c.get("sheet", 0))
+            raw = read_sheet(path, 0 if c.get("sheet") == "any" else c.get("sheet", 0))
             if raw is None:
                 continue
             # 表头里带 {week} 的列名（KTR 的 "stan W{week}"）只比前缀，其余要完全一样
@@ -117,10 +119,14 @@ class Classifier:
 
     def week_from_content(self, path, src):
         c = self.cfg[src]
-        if not c.get("period"):
-            return None
-        raw = read_sheet(path, c.get("sheet", 0))
+        raw = read_sheet(path, 0 if c.get("sheet") == "any" else c.get("sheet", 0))
         if raw is None:
+            return None
+        if src == "KTR":  # KTR 原始文件名没有周数，表头是 stan W44
+            for x in raw.iloc[0]:
+                if m := re.fullmatch(r"stan W0?(\d{1,2})", str(x).strip()):
+                    return int(m.group(1))
+        if not c.get("period"):
             return None
         h = find_header(raw, [x.replace("{week}", "") for x in c["header"]] if "{week}" not in str(c["header"]) else [])
         per = detect_period(raw, h, c["period"])

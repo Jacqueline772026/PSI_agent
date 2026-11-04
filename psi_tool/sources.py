@@ -3,8 +3,10 @@
 统一格式的列：source, psi_sheet, file, key_type, key, name, so, stock
 """
 import datetime as dt
+import io
 import re
 import warnings
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -62,6 +64,7 @@ class SourceResult:
     raw_total_stock: float = 0
     period: tuple = None  # (from, to)
     warnings: list = field(default_factory=list)
+    name_excluded: pd.DataFrame = None  # 被 exclude_name 丢掉的行（给防串检查用）
 
 
 def read_sheet(path, sheet):
@@ -165,6 +168,12 @@ def extract_msg_attachments(root):
                     name = (name or "").replace("\x00", "").strip()
                     if name and name.lower().endswith((".xlsx", ".xls", ".csv")):
                         (target / Path(name).name).write_bytes(att.data)
+                    elif name.lower().endswith(".zip"):  # GG 的周报是 OneDrive 打包的 zip
+                        with zipfile.ZipFile(io.BytesIO(att.data)) as z:
+                            for info in z.infolist():
+                                n = Path(info.filename).name
+                                if n.lower().endswith((".xlsx", ".xls")) and not n.startswith(("~$", ".")):
+                                    (target / n).write_bytes(z.read(info))
                 msg.close()
             except Exception:  # 损坏的邮件或特殊附件，跳过
                 target.mkdir(parents=True, exist_ok=True)
@@ -177,8 +186,8 @@ def candidates(root, cfg, week):
     path_rx = re.compile(week_regex(cfg["week_in_path"], week), re.I) if cfg.get("week_in_path") else None
     out = []
     # 邮件附件只在邮件所在文件夹里没有另存同名文件时才用（另存的那份可能是人工改过的）
-    # 相对路径从 --inbox 的上一层算起，这样 inbox 文件夹本身叫 W44原始文件 也算"路径里有 W44"
-    roots = [(Path(root), Path(root).resolve().parent, None)] + [(d, MSG_CACHE, folder) for d, folder in extract_msg_attachments(root)]
+    # 路径规则也看 --inbox 那一层的名字，这样 inbox 文件夹本身叫 W44原始文件 也算"路径里有 W44"
+    roots = [(Path(root), Path(root), None)] + [(d, MSG_CACHE, folder) for d, folder in extract_msg_attachments(root)]
     seen = set()
     for base, rel_base, msg_folder in roots:
         for p in sorted(base.rglob("*")):
@@ -186,7 +195,7 @@ def candidates(root, cfg, week):
                 continue
             if msg_folder is not None and (msg_folder / p.name).exists():
                 continue
-            rel = p.resolve().relative_to(rel_base.resolve()).as_posix()
+            rel = f"{Path(root).resolve().name}/{p.resolve().relative_to(rel_base.resolve()).as_posix()}"
             if path_rx and not path_rx.search(rel):
                 continue
             if (p.name, p.stat().st_size) in seen:  # 邮件附件和另存的文件是同一份
@@ -223,10 +232,32 @@ def load_source(root, name, cfg, week):
     res = SourceResult(name, cfg["psi_sheet"])
     frames = []
     for path in candidates(root, cfg, week):
-        raw = read_sheet(path, cfg.get("sheet", 0))
+        if cfg.get("sheet") == "any":
+            names = pd.ExcelFile(path).sheet_names
+        else:
+            names = [cfg.get("sheet", 0)]
+        raw, h = None, None
+        for sheet_name in names:
+            raw = read_sheet(path, sheet_name)
+            h = None if raw is None else find_header(raw, cfg["header"])
+            if h is not None:
+                break
+        alt = False
+        if h is None and cfg.get("header_alt"):  # 客户换了格式
+            for sheet_name in names:
+                raw = read_sheet(path, sheet_name)
+                h = None if raw is None else find_header(raw, cfg["header_alt"])
+                if h is not None:
+                    alt = True
+                    break
         if raw is None:
             continue
-        h = find_header(raw, cfg["header"])
+        if h is None and week < 10:  # KTR 的列名个位数周带前导 0：stan W05
+            h = find_header(raw, [x.replace(f"W{week}", f"W{week:02d}") for x in cfg["header"]])
+            if h is not None:
+                cfg = {k: ([x.replace(f"W{week}", f"W{week:02d}") for x in v] if isinstance(v, list)
+                           else v.replace(f"W{week}", f"W{week:02d}"))
+                       if k in ("header", "so", "stock") else v for k, v in cfg.items()}
         if h is None:
             continue
         if cfg.get("layout") == "weekly_columns":
@@ -240,18 +271,20 @@ def load_source(root, name, cfg, week):
         ok = period_ok(period, week)
         if ok is False:
             continue  # 别的周的文件
-        frames.append((path, raw, h, period))
+        frames.append((path, raw, h, period, alt))
     if not frames:
         res.warnings.append("没找到当周文件")
         return res
     if len(frames) > 1 and not cfg.get("multiple"):
-        newest = max(frames, key=lambda f: f[0].stat().st_mtime)
+        newest = max(frames, key=lambda f: f[0].stat().st_mtime)  # 邮件附件是刚解出来的，通常是原件
         res.warnings.append(f"找到 {len(frames)} 个候选文件，用了最新的 {newest[0].name}："
                             + "、".join(f[0].name for f in frames))
         frames = [newest]
 
     parts = []
-    for path, raw, h, period in frames:
+    for path, raw, h, period, alt in frames:
+        if alt:
+            res.warnings.append(f"{path.name} 是新格式（{'、'.join(cfg['header_alt'])}），没有品类列：只保留查得到代码的行")
         res.files.append(str(path))
         if period:
             res.period = period
@@ -277,12 +310,13 @@ def load_source(root, name, cfg, week):
                     for k, x in zip(keys, body.iloc[:, c_fb])]
         df = pd.DataFrame({
             "key": keys,
-            "name": body.iloc[:, c_name].astype(str).str.strip(),
+            # pandas 3 的 astype(str) 会保留空值，统一成空字符串，否则没有名称的汇总行（如占比合计）会被当成产品
+            "name": body.iloc[:, c_name].astype(str).str.strip().fillna(""),
             "so": to_number(body.iloc[:, c_so]) if c_so is not None else 0,
             "stock": sum(to_number(body.iloc[:, c]) for c in c_stock) if c_stock else 0,
         })
         # 识别码是空的或不是数字：有数量、有产品名的行保留下来记为未匹配，其余（空行、重复表头）丢掉
-        raw_key = body.iloc[:, c_key].astype(str).str.strip()
+        raw_key = body.iloc[:, c_key].astype(str).str.strip().fillna("nan")
         has_qty = (df["so"] != 0) | (df["stock"] != 0)
         named = ~df["name"].isin(["", "nan"])
         keep = df["key"].notna() | (has_qty & named)
@@ -295,14 +329,20 @@ def load_source(root, name, cfg, week):
         res.raw_total_so += df["so"].sum()
         res.raw_total_stock += df["stock"].sum()
         keep = pd.Series(True, index=df.index)
-        if cfg.get("include"):
+        if cfg.get("include") and not alt:
             c = column(raw, h, cfg["include"]["column"])
             vals = body.iloc[:, c].loc[df.index].astype(str)
             keep &= vals.str.contains(cfg["include"]["regex"], regex=True, flags=re.I)
+        if alt and cfg.get("alt_exclude_name"):
+            keep &= ~df["name"].str.contains(cfg["alt_exclude_name"], regex=True, flags=re.I)
         if cfg.get("exclude_name"):
-            keep &= ~df["name"].str.contains(cfg["exclude_name"], regex=True, flags=re.I)
+            hit = df["name"].str.contains(cfg["exclude_name"], regex=True, flags=re.I)
+            dropped = df[keep & hit]
+            res.name_excluded = dropped if res.name_excluded is None else pd.concat([res.name_excluded, dropped])
+            keep &= ~hit
         df = df[keep].copy()
         df["file"] = path.name
+        df["drop_unmatched"] = alt
         parts.append(df)
     if parts:
         res.rows = pd.concat(parts, ignore_index=True)

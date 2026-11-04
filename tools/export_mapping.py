@@ -5,7 +5,7 @@
 
 识别码收集自历史周报里出现过的所有型号；代码来自 mapping/mapping.xlsx，
 只写项目代码的（如 P16）按 PSI 该 sheet 的行补成完整代码（P168+256）。
-另外用产品名再独立匹配一次，和历史写法不一致的行标黄，请人工确认。
+每一行都按原始名称、TTL 和 PSI 独立核对过（tools.audit_mapping），不依赖上周写法；结论写在“核对结论”“依据”两列。
 
 用法：.venv/bin/python -m tools.export_mapping
 """
@@ -17,8 +17,9 @@ from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
 from checks.structure_check import COL_E, COL_G, COL_H, load
-from psi_tool.mapping import Mapper, latest_ttl, resolve
-from psi_tool.paths import MAPPING, MAPPING_EXCEL, OPERATORS_HISTORY, PSI_FILE, TTL_DIR
+from psi_tool.mapping import CODE_ALIASES, Mapper, latest_ttl, legacy_code, resolve
+from psi_tool.paths import HISTORY, MAPPING, MAPPING_EXCEL, OPERATORS_HISTORY, PSI_FILE, ROOT, TTL_DIR
+from tools.audit_mapping import audit_entry, run_audit
 from tools.learn_mappings import name_key
 
 REPORTS = OPERATORS_HISTORY
@@ -91,6 +92,8 @@ def classify(source, name, code, category, sheet_codes):
         return "不计入：reSTART 翻新机"
     if source == "TMO_MATERIAL" and "OUTLET" in up:
         return "不计入：Outlet"
+    if source == "TMO_MATERIAL" and re.search(r"\bCR\s*$", name):
+        return "不计入：特殊版本 CR"
     if source == "ORANGE_NAME" and up.startswith("E."):
         return "不计入：门店展示机（E.）"
     if category == "exclude":
@@ -102,7 +105,15 @@ def classify(source, name, code, category, sheet_codes):
     return "计入"
 
 
-def build():
+def audit_weeks():
+    """把最近几周的原始周报也纳入核对，映射表里没有的新型号才查得到。"""
+    weeks = {42: HISTORY / "W42-43" / "W42", 43: HISTORY / "W42-43" / "W43", 44: ROOT / "W44测试" / "W44原始文件"}
+    for path in ROOT.glob("W[0-9][0-9]/W*原始文件"):
+        weeks[int(path.parent.name[1:])] = path
+    return {w: p for w, p in weeks.items() if p.exists()}
+
+
+def build(df, ev):
     psi = load(PSI_FILE)
     mapper = Mapper(latest_ttl(TTL_DIR), MAPPING)
     pages = {}
@@ -110,11 +121,23 @@ def build():
         part = {"TMO": "T-Mobile", "Play": "Play", "Plus": "Plus"}.get(page, "")
         codes, projects, names = psi_index(psi[sheet_name])
         rows = []
-        for key, (name, week) in sorted(collect(file_rx, sheet, key_col, name_col, part).items()):
+        seen = collect(file_rx, sheet, key_col, name_col, part)
+        known = {k.upper() for k in seen}
+        recent = df[df["来源"] == source]  # 历史文件夹之外的周报、映射表里的识别码也要列出来
+        for _, r in recent.iterrows():
+            if str(r["识别码"]).upper() not in known:
+                seen[r["识别码"]] = (r["原始名称"], int(r["最后一周"][1:]) if r["最后一周"] else 0)
+        verdicts = {(str(r["识别码"]).upper()): r for _, r in recent.iterrows()}
+        for key, (name, week) in sorted(seen.items()):
             lookup_key = key.upper() if source.endswith("_NAME") else key
             code, category, _ = mapper.lookup(source, lookup_key)
             code = resolve(code, name, codes, projects) if code else None
             status = classify(source, name, code, category, codes)
+            audited = verdicts.get(key.upper())
+            if audited is None:
+                audited = audit_entry(ev, source, lookup_key, name, code or "", category or "")
+            if status.startswith("⚠️") and audited["结论"] == "一致":
+                status = "不计入：PSI 没有这个型号这一行"
             # 用名称独立再配一次，和历史写法不一样就提示
             nk, mem = name_key(name)
             by_name = names.get((nk, mem), set())
@@ -123,7 +146,8 @@ def build():
                 check = f"按名称应为 {next(iter(by_name))}，请确认"
             rows.append({"识别码": key, "名称（最近一次）": name, "PSI 代码": code if status == "计入" else "",
                          "是否计入": status, "历史写法": code or "", "最后出现": f"W{week}" if week else "",
-                         "核对提示": check})
+                         "核对提示": check, "核对结论": audited["结论"], "依据": audited["依据"],
+                         "旧代码": legacy_code(code) if status == "计入" else ""})
         pages[page] = pd.DataFrame(rows)
     return pages
 
@@ -133,10 +157,17 @@ GUIDE = [
      "在原始文件旁边加一列 XLOOKUP 取 'PSI 代码'，再透视求和，就是要填进 PSI 的数。和工具用的是同一份映射。"),
     ("'是否计入' 列", "只有'计入'的行有 PSI 代码。DEMO、Outlet、Orange 的 E. 展示机、非手机、PSI 没有这一行的型号都不计入，"
      "XLOOKUP 会返回空，透视时自然不算。"),
-    ("黄色行", "历史上手工写的代码和产品名对不上（例如 Redmi 15C 5G 被写成 Redmi 15 5G 的 O19），已经按名称改正。请过一眼。"),
+    ("以后怎么用", "每周直接按这份表匹配，不要沿用上周文件的 CODE 列：上周写错的会一起带过来。"
+     "这份表的代码按原始名称 + TTL + PSI 独立核对过，“核对结论”“依据”两列说明了每行怎么来的。"),
+    ("黄色、红色行", "黄色：名称和历史写法不一致或无法独立验证，请过一眼。红色：核对发现冲突，查清前不要用。"),
+    ("颜色尾缀", "TMO 名称被截断时 bi、cz、fi、nie 这些都是颜色（biały、czarny、fioletowy、niebieski），不影响代码，也不排除。"
+     "想确认颜色时看 TTL ID 表的 Color 列。"),
+    ("代码别名", "Q16 = MOSCOW，Q16U = BRUSSELS，Q16P = MOSCOWP。PSI 和“PSI 代码”列都用新代码，最后一列“旧代码”对应 BOC、促销表的写法，在表里搜哪个都能找到。填 PSI 用新代码。"),
+    ("其他 sheet", "“待你确认”：拿不准的。“TTL表的问题”“PSI名称的问题”：源表本身的错误。核对方法见 docs/对照表核对方法.md。"),
     ("TMO 公式（原始表 B 列 = Materiał，C 列 = Opis）",
      '=IF(OR(ISNUMBER(SEARCH("DEMO",C2)),ISNUMBER(SEARCH("SAMPLE",C2)),ISNUMBER(SEARCH("OUTLET",C2)),'
-     'ISNUMBER(SEARCH("RESTART",C2))),"",XLOOKUP(B2,TMO!A:A,TMO!C:C,"#N/A"))'),
+     'ISNUMBER(SEARCH("RESTART",C2)),EXACT(RIGHT(TRIM(C2),3)," CR")),"",'
+     'XLOOKUP(B2,TMO!A:A,TMO!C:C,"#N/A"))'),
     ("TMO 只去 DEMO 的单独公式（想先单独看样机有多少时用）",
      '=IF(OR(ISNUMBER(SEARCH("DEMO",C2)),ISNUMBER(SEARCH("SAMPLE",C2))),"样机","")   '
      '← 筛选这一列 = 样机 的行就是要去掉的 DEMO / SAMPLE。这个公式不分大小写'),
@@ -152,27 +183,37 @@ GUIDE = [
 ]
 
 
-def write(pages, path):
+def write(pages, path, extra):
     path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
         pd.DataFrame(GUIDE, columns=["", "说明"]).to_excel(xw, sheet_name="说明", index=False)
         for page, df in pages.items():  # XLOOKUP 不分大小写，识别码保持原样
             df.to_excel(xw, sheet_name=page, index=False)
+        for name, df in extra.items():
+            df.to_excel(xw, sheet_name=name, index=False)
     wb = load_workbook(path)
     yellow, grey = PatternFill("solid", fgColor="FFF2CC"), Font(color="999999")
+    red = PatternFill("solid", fgColor="F8CBAD")
     for ws in wb.worksheets:
         ws.freeze_panes = "B2"
         for cell in ws[1]:
             cell.font = Font(bold=True)
+        if ws.title in extra:
+            for col in ws.columns:
+                ws.column_dimensions[col[0].column_letter].width = min(70, max(10, max(len(str(c.value or "")) for c in col) + 2))
+            continue
         if ws.title == "说明":
             ws.column_dimensions["A"].width, ws.column_dimensions["B"].width = 42, 120
             for row in ws.iter_rows(min_row=2):
                 row[1].alignment = Alignment(wrap_text=True, vertical="top")
             continue
-        for col, w in zip("ABCDEFG", (26, 46, 16, 30, 16, 10, 30)):
+        for col, w in zip("ABCDEFGHIJ", (26, 46, 16, 30, 16, 10, 30, 10, 60, 14)):
             ws.column_dimensions[col].width = w
         for row in ws.iter_rows(min_row=2):
-            if row[6].value:
+            if row[7].value == "冲突":
+                for c in row:
+                    c.fill = red
+            elif row[6].value or row[7].value == "无法验证":
                 for c in row:
                     c.fill = yellow
             elif row[3].value != "计入":
@@ -182,9 +223,18 @@ def write(pages, path):
 
 
 def main():
-    pages = build()
+    df, ttl, labels, ev = run_audit(PSI_FILE, MAPPING, audit_weeks())
+    pages = build(df, ev)
+    pending = df[df["结论"].isin(["冲突", "漏映射", "排除待查", "无法验证"])
+                 | (df["结论"].eq("人工确认") & df["依据"].str.contains("再看一眼") & df["来历"].str.contains("手工匹配"))]
+    pending = pending[["结论", "PSI表", "识别码", "原始名称", "映射表代码", "建议代码", "依据", "最后一周", "周报SO", "周报库存"]]
+    aliases = pd.DataFrame([dict(旧代码=old, PSI代码=new) for old, new in CODE_ALIASES.items()])
+    aliases["产品"] = aliases["PSI代码"].map({"BRUSSELS": "Redmi Note 17 Pro Max 5G", "MOSCOW": "Redmi Note 17 Pro 5G", "MOSCOWP": "POCO X8"})
+    aliases["例子"] = aliases["PSI代码"].map({"BRUSSELS": "Q16U8+256 → BRUSSELS8+256", "MOSCOW": "Q166+256 → MOSCOW6+256；Q168+512 → MOSCOW8+512", "MOSCOWP": "Q16P8+256 → MOSCOWP8+256"})
+    aliases["在哪里见到旧代码"] = "BOC、促销表、早期手工表"
+    extra = {"代码别名": aliases, "待你确认": pending, "TTL表的问题": ttl, "PSI名称的问题": labels}
     out = MAPPING_EXCEL
-    write(pages, out)
+    write(pages, out, extra)
     for page, df in pages.items():
         print(f"{page}: {len(df)} 个识别码，计入 {int((df['是否计入'] == '计入').sum())}，"
               f"待确认 {int(df['是否计入'].str.startswith('⚠️').sum())}，名称核对提示 {int((df['核对提示'] != '').sum())}")
