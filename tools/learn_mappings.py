@@ -19,8 +19,8 @@ from psi_tool.paths import MAPPING, OPERATORS_HISTORY, OUTPUT, PSI_FILE
 EXCLUDE = {"AIOT", "OUTLET", "DEMOS", "DEMO", "RESTART", "EXPO"}  # 非手机平板、样机、翻新机
 SOURCES = [
     # (mapping 里的 source, 文件名正则, 识别码列, 周数正则)
-    ("PLAY_SKU", r"Stock and sales - week (\d+)\.xlsx", "SKU", r"week (\d+)"),
-    ("TMO_MATERIAL", r"(W\d+ )?kw_cpfr_main_Xiaomi\.xlsx", "Materiał", r"W(\d+)"),
+    ("PLAY_SKU", r".*Stock and sales.*week \d+.*\.xlsx", "SKU", r"week (\d+)"),
+    ("TMO_MATERIAL", r".*kw_cpfr_main_Xiaomi.*\.xlsx", "Materiał", r"[Ww](\d+)"),
 ]
 
 
@@ -45,7 +45,8 @@ def learn(folder):
                     continue
                 name_col = "Model" if "Model" in df.columns else "Opis" if "Opis" in df.columns else key_col
                 for _, r in df[[key_col, c, name_col]].dropna(subset=[key_col, c]).iterrows():
-                    key, code = str(r[key_col]).strip(), re.sub(r"\s+", "", str(r[c]))
+                    # 代码里的空格保留（PSI 里就是 'P83 inbox6+128'），匹配 PSI 时 resolve() 会忽略空格比较
+                    key, code = str(r[key_col]).strip(), re.sub(r"\s+", " ", str(r[c]).strip())
                     if not key or code.lower() == "nan":
                         continue
                     old = seen.get(key)

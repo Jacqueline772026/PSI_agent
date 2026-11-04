@@ -14,6 +14,9 @@ from pathlib import Path
 import pandas as pd
 
 MAPPING_COLUMNS = ["source", "key", "psi_code", "category", "product_name", "added_on", "added_by"]
+# 同一个产品的新旧代码：PSI 和 TTL 用右边，BOC、促销表和早期周报还在用左边
+CODE_ALIASES = {"Q16U": "BRUSSELS", "Q16P": "MOSCOWP", "Q16": "MOSCOW"}
+ALIAS_RX = re.compile(r"^(Q16U|Q16P|Q16)(?=\d|$)")
 MEMORY = re.compile(r"(\d{1,2})\s*(?:GB)?\s*[/+]\s*(\d{2,4})\s*(?:GB|G)?", re.I)
 
 
@@ -66,20 +69,39 @@ def memory_from_name(name):
     return f"{int(m.group(1))}+{int(m.group(2))}" if m else None
 
 
+def canonical(code):
+    """旧代码换成 PSI 用的新代码：Q166+256 → MOSCOW6+256。"""
+    return ALIAS_RX.sub(lambda m: CODE_ALIASES[m.group(1)], str(code).strip()) if code else code
+
+
+def legacy_code(code):
+    """PSI 代码对应的旧代码（BOC、促销表还在用）：MOSCOW6+256 → Q166+256；没有旧代码的返回空字符串。"""
+    for old, new in CODE_ALIASES.items():
+        m = re.fullmatch(rf"{new}((?:2|3|4|6|8|12|16)\+\d{{2,4}})?", str(code or ""))
+        if m:
+            return old + (m.group(1) or "")
+    return ""
+
+
 def resolve(code, name, sheet_codes, project_rows):
     """把 'P16' 这类只有项目代码的结果补成 PSI 里的完整代码。
 
     sheet_codes: 目标 sheet 的完整代码集合；project_rows: 项目代码 → 该 sheet 里的完整代码列表。
     """
+    code = canonical(code)
     if code is None or code in sheet_codes:
         return code
-    options = project_rows.get(code.replace(" ", ""), [])
+    squeezed = code.replace(" ", "")
+    for c in sheet_codes:  # 'LEEDS 4+128' = 'LEEDS4+128'，'P83inbox6+128' = 'P83 inbox6+128'：比较时忽略空格，结果用 PSI 的写法
+        if c and str(c).replace(" ", "") == squeezed:
+            return c
+    options = project_rows.get(squeezed, [])
     if len(options) == 1:
         return options[0]
     mem = memory_from_name(name)
-    if mem and f"{code}{mem}" in sheet_codes:
-        return f"{code}{mem}"
-    return code.replace(" ", "")
+    if mem and f"{squeezed}{mem}" in sheet_codes:
+        return f"{squeezed}{mem}"
+    return code
 
 
 def append_mappings(mapping_path, rows, added_by):
