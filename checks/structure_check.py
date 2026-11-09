@@ -5,7 +5,7 @@
   2. 小计区间：SUMIFS 的区间漏掉 Others 或产品行、或者重复计数
   3. 重复：同一张 sheet 里同一个 代码+指标 出现多次
   4. 代码书写：G/H 列前后空格；F 列手写且和 G&H 不一致
-  5. MEX 等 ST 公式末尾残留手动加的 +N
+  5. ST 公式末尾手动加的 BI 数（+N，MEX、Max）：复制到下一周前要删
   6. 库存恒等式：本周 Actual 与 上周 Actual + ST − SO 偏差
   7. 每张 sheet 已填到第几周
 
@@ -364,7 +364,7 @@ def build_report(path, sheets):
     L.append(md_table(["sheet", "行", "指标", "问题"], rows) if rows else "✅ 没有发现。")
 
     L += ["", "## 5. ST 公式状态", "",
-          "按 SOP，每周把 SUMIFS 公式复制到新一周，再把上一周转成数值。MEX 还会在公式末尾手动加 BI 妥投量（+N），"
+          "按 SOP，每周把 SUMIFS 公式复制到新一周，再把上一周转成数值。MEX、Max（OM Others）会在公式末尾手动加 BI 查到的数（+N），"
           "复制到下一周前要先删掉。历史周如果一直是公式，以后改工具表或 DB ST 的旧行，历史数会跟着变。", ""]
     rows = []
     for n, v in per_sheet.items():
