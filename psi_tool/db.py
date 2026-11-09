@@ -310,7 +310,9 @@ def build_db(week, inbox, psi_path):
     # IM 同时给了 Mobility 和 IMEI List：以 Mobility 为准（SOP），两份按 EAN + 客户对一下，不一致的列出来去问 IM
     diffs = im_crosscheck(inbox, week)
     if diffs is not None and len(diffs):
-        notes.append(f"  - ⚠️ IM 的 Mobility（PSI 用这份）和 IMEI List 有 {len(diffs)} 处对不上，建议问 IM（邮件草稿见 W{week}_待确认邮件.md）："
+        # 2026-11-09 已和 IM 确认：IMEI List 按发货日期、Mobility 按发票日期算周，账期口径不同，差额是时间差；以 Mobility 为准
+        notes.append(f"  - ℹ️ IM 的 Mobility（PSI 用这份）和 IMEI List 有 {len(diffs)} 处不同，属于口径差异"
+                     "（IMEI 按发货日期、Mobility 按发票日期），不用处理："
                      + "；".join(f"{d['model']} → {d['customer']}：Mobility {d['mobility']} / IMEI {d['imei']}" for d in diffs))
     elif diffs is not None:
         notes.append("  - IM 的 Mobility 和 IMEI List 按 EAN + 客户完全一致")

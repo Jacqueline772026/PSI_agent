@@ -316,11 +316,9 @@ def main():
     write_db_paste(paste, st, stock)
     # 要找客户 / 同事确认的问题：联系人 + 英文邮件草稿
     missing = [p.name for res in results.values() for p in res["parts"] if not p.files]
-    from psi_tool.db import im_crosscheck, mark_im_files
     from psi_tool.inquiry import write as write_inquiry
-    diffs = im_crosscheck(a.inbox, a.week) or []
-    marked = mark_im_files(a.inbox, a.week, diffs, out) if diffs else []
-    write_inquiry(out / f"W{a.week}_待确认邮件.md", a.week, missing, diffs, marked)
+    # IM 的 Mobility 和 IMEI List 不一致是账期口径差异（已确认），不再生成询问邮件；需要时仍可用 db.mark_im_files 标红截图
+    write_inquiry(out / f"W{a.week}_待确认邮件.md", a.week, missing, [])
     text = report.read_text(encoding="utf-8").split("\n")
     at = text.index("## 总览")  # DB 放在 OM/OP 前面
     # 库存恒等式：上周库存和本周 ST 来自 PSI 导出，本周 SO / 库存用工具结果（粘贴前就能看到）
