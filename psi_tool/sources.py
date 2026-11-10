@@ -340,6 +340,11 @@ def load_source(root, name, cfg, week):
             dropped = df[keep & hit]
             res.name_excluded = dropped if res.name_excluded is None else pd.concat([res.name_excluded, dropped])
             keep &= ~hit
+        if cfg.get("exclude_key"):  # 按识别码排除（TMO 物料号第 6 位 D/S/R = 样机、Outlet、翻新；名称被截断时也认得出）
+            hit = df["key"].astype(str).str.contains(cfg["exclude_key"], regex=True)
+            dropped = df[keep & hit]
+            res.name_excluded = dropped if res.name_excluded is None else pd.concat([res.name_excluded, dropped])
+            keep &= ~hit
         df = df[keep].copy()
         df["file"] = path.name
         df["drop_unmatched"] = alt

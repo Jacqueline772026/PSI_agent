@@ -82,8 +82,12 @@ def psi_index(sheet):
     return codes, projects, names
 
 
-def classify(source, name, code, category, sheet_codes):
+def classify(source, name, code, category, sheet_codes, key=None):
     up = name.upper()
+    kind = re.match(r"^XA-[A-Z]-([DSR])", key or "") if source == "TMO_MATERIAL" else None
+    if kind:  # 物料号第 6 位：名称被截断（Outl、reSTAR）时也认得出
+        return {"D": "不计入：DEMO / EXPO 展示机（物料号 D）", "S": "不计入：SAMPLE 样机（物料号 S）",
+                "R": "不计入：Outlet / reSTART（物料号 R）"}[kind.group(1)]
     if source == "TMO_MATERIAL" and "DEMO" in up:
         return "不计入：DEMO 样机"
     if source == "TMO_MATERIAL" and "SAMPLE" in up:
@@ -132,7 +136,7 @@ def build(df, ev):
             lookup_key = key.upper() if source.endswith("_NAME") else key
             code, category, _ = mapper.lookup(source, lookup_key)
             code = resolve(code, name, codes, projects) if code else None
-            status = classify(source, name, code, category, codes)
+            status = classify(source, name, code, category, codes, key)
             audited = verdicts.get(key.upper())
             if audited is None:
                 audited = audit_entry(ev, source, lookup_key, name, code or "", category or "")
@@ -145,7 +149,7 @@ def build(df, ev):
             if status == "计入" and len(by_name) == 1 and code not in by_name:
                 check = f"按名称应为 {next(iter(by_name))}，请确认"
             rows.append({"识别码": key, "名称（最近一次）": name, "PSI 代码": code if status == "计入" else "",
-                         "是否计入": status, "历史写法": code or "", "最后出现": f"W{week}" if week else "",
+                         "是否计入": status, "历史写法": (code or "") if status == "计入" else (f"（曾写成 {code}，不要用）" if code else ""), "最后出现": f"W{week}" if week else "",
                          "核对提示": check, "核对结论": audited["结论"], "依据": audited["依据"],
                          "旧代码": legacy_code(code) if status == "计入" else ""})
         pages[page] = pd.DataFrame(rows)
@@ -164,18 +168,17 @@ GUIDE = [
      "想确认颜色时看 TTL ID 表的 Color 列。"),
     ("代码别名", "Q16 = MOSCOW，Q16U = BRUSSELS，Q16P = MOSCOWP。PSI 和“PSI 代码”列都用新代码，最后一列“旧代码”对应 BOC、促销表的写法，在表里搜哪个都能找到。填 PSI 用新代码。"),
     ("其他 sheet", "“待你确认”：拿不准的。“TTL表的问题”“PSI名称的问题”：源表本身的错误。核对方法见 docs/对照表核对方法.md。"),
-    ("TMO 公式（原始表 B 列 = Materiał，C 列 = Opis）",
-     '=IF(OR(ISNUMBER(SEARCH("DEMO",C2)),ISNUMBER(SEARCH("SAMPLE",C2)),ISNUMBER(SEARCH("OUTLET",C2)),'
-     'ISNUMBER(SEARCH("RESTART",C2)),EXACT(RIGHT(TRIM(C2),3)," CR")),"",'
+    ("TMO 公式：原始表 B 列 = Materiał，C 列 = Opis。物料号第 6 位是 D / S / R（DEMO、EXPO、SAMPLE、Outlet、reSTART）"
+     "的直接不计入，名称被截断成 Outl、reSTAR 也认得出；名称以大写 CR 结尾的特殊版本也不计入",
+     '=IF(OR(ISNUMBER(SEARCH(MID(B2,6,1),"DSR")),ISNUMBER(SEARCH("DEMO",C2)),ISNUMBER(SEARCH("SAMPLE",C2)),'
+     'ISNUMBER(SEARCH("OUTL",C2)),ISNUMBER(SEARCH("RESTA",C2)),EXACT(RIGHT(TRIM(C2),3)," CR")),"",'
      'XLOOKUP(B2,TMO!A:A,TMO!C:C,"#N/A"))'),
-    ("TMO 只去 DEMO 的单独公式（想先单独看样机有多少时用）",
-     '=IF(OR(ISNUMBER(SEARCH("DEMO",C2)),ISNUMBER(SEARCH("SAMPLE",C2))),"样机","")   '
-     '← 筛选这一列 = 样机 的行就是要去掉的 DEMO / SAMPLE。这个公式不分大小写'),
+    ("TMO 单独标出不计入的行（想先看样机、Outlet 有多少时用；筛选这一列 = 不计入）",
+     '=IF(ISNUMBER(SEARCH(MID(B2,6,1),"DSR")),"不计入","")'),
     ("Play 公式（原始表 Arkusz1：C 列 = SKU）", '=XLOOKUP(C2,Play!A:A,Play!C:C,"#N/A")'),
     ("Plus 公式（原始表 B 列 = Model）", '=XLOOKUP(TRIM(B2),Plus!A:A,Plus!C:C,"#N/A")'),
-    ("Orange 公式（原始表 B 列 = Nazwa materiału）",
-     '=XLOOKUP(TRIM(SUBSTITUTE(B2,CHAR(160)," ")),Orange!A:A,Orange!C:C,"#N/A")   '
-     '库存 = Zapas_CWH + Zapas_POS + Zapas_B2B'),
+    ("Orange 公式（原始表 B 列 = Nazwa materiału；库存 = Zapas_CWH + Zapas_POS + Zapas_B2B）",
+     '=XLOOKUP(TRIM(SUBSTITUTE(B2,CHAR(160)," ")),Orange!A:A,Orange!C:C,"#N/A")'),
     ("Orange（Jet 表）公式（Main sheet A 列 = Model）", '=XLOOKUP(TRIM(A5),\'Orange（Jet表）\'!A:A,\'Orange（Jet表）\'!C:C,"")'),
     ("返回 #N/A 怎么办", "说明是表里没有的新型号：手机平板就在 mapping/mapping.xlsx 补一行（工具下次自动生效），"
      "再重新导出这份表；不是手机平板就忽略。返回空 = 不计入。"),
@@ -206,6 +209,8 @@ def write(pages, path, extra):
             ws.column_dimensions["A"].width, ws.column_dimensions["B"].width = 42, 120
             for row in ws.iter_rows(min_row=2):
                 row[1].alignment = Alignment(wrap_text=True, vertical="top")
+                if isinstance(row[1].value, str) and row[1].value.startswith("="):
+                    row[1].data_type = "s"  # 公式要以文字显示，方便复制；否则 Excel 会去算它，格子看起来是空的
             continue
         for col, w in zip("ABCDEFGHIJ", (26, 46, 16, 30, 16, 10, 30, 10, 60, 14)):
             ws.column_dimensions[col].width = w
