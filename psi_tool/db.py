@@ -15,16 +15,24 @@ import pandas as pd
 from psi_tool.sources import candidates, week_range
 
 SKU_TABLE = "工具表1_SKUID对应表 - GDP 平台导出"
+POCO_FROM_WEEK = 45  # 从这一周起 AB 的 POCO 表要一起算，没收到会提示
 # 配件、生态链产品：工具表1 查不到且名称命中这些词的行不贴（SOP：手环、手机壳、平板笔之类直接删掉）
 ACCESSORY = re.compile(r"cover|keyboard|klawiatur|\bpen\b|etui|case|filter|filtr|brush|strap|buds|watch|band|lamp|vacuum|"
                        r"camera|kamera|charg|ładow|adapter|stand|cable|kabel|purifier|scooter|tv\b|speaker|router", re.I)
 
 # 每家的文件：文件名正则（{week} 会替换）+ 用来核对周的日期规则
 FILES = {
-    "AB_ST": {"file": r"xiaomi_smart_sell_through_(\d{8})_(\d{8})\.xlsx", "dates": "start_end"},
-    "AB_STOCK": {"file": r"xiaomi_smart_stock_(\d{8})\.xlsx", "dates": "end"},
-    "ALSO": {"file": r"Xiaomi_Stock_Sellout_(\d{8})-(\d{8})\.xls", "dates": "start_end"},
-    "IM_ST": {"file": r"Mobility - Xiaomi -Sales Phones Wk{week}\.xlsx"},
+    # 日期后面允许多出别的字（下载后改名，如 "——AB"）
+    "AB_ST": {"file": r"xiaomi_smart_sell_through_(\d{8})_(\d{8})\D.*\.xlsx|xiaomi_smart_sell_through_(\d{8})_(\d{8})\.xlsx", "dates": "start_end"},
+    "AB_STOCK": {"file": r"xiaomi_smart_stock_(\d{8})\D.*\.xlsx|xiaomi_smart_stock_(\d{8})\.xlsx", "dates": "end"},
+    "ALSO": {"file": r"Xiaomi_Stock_Sellout_(\d{8})-(\d{8})\D.*\.xls|Xiaomi_Stock_Sellout_(\d{8})-(\d{8})\.xls", "dates": "start_end"},
+    # 2026 W45 起 AB 另发 POCO 的表；还没见过样本，先按和 smart 表同样的命名和格式读，格式不一样会在报告里提示
+    "AB_POCO_ST": {"file": r"xiaomi_poco_sell_through_(\d{8})_(\d{8})\D.*\.xlsx|xiaomi_poco_sell_through_(\d{8})_(\d{8})\.xlsx", "dates": "start_end"},
+    "AB_POCO_STOCK": {"file": r"xiaomi_poco_stock_(\d{8})\D.*\.xlsx|xiaomi_poco_stock_(\d{8})\.xlsx", "dates": "end"},
+    "ALSO_POCO": {"file": r"ALSO_Reporting_POCO_(\d{8})_(\d{8})\D.*\.xlsx?|ALSO_Reporting_POCO_(\d{8})_(\d{8})\.xlsx?", "dates": "start_end"},
+    "IM_ST": {"file": r"Mobility - Xiaomi -Sales Phones Wk{week}.*\.xlsx"},
+    # 2026 W44 起 IM 的 ST 也可能是串号明细：一行一台，按 型号 + 客户 + EAN + 日期 汇总
+    "IM_IMEI": {"file": r"IMEI List Wk{week}\D.*\.xlsx|IMEI List Wk{week}\.xlsx"},
     # IM 库存文件按"发出那周"命名：W41 的库存叫 Internal W42
     "IM_STOCK": {"file": r"Internal W{next} 2026 Ingram SP split\.xlsx"},
 }
@@ -37,7 +45,7 @@ def find_files(root, key, week):
     for p in candidates(root, {"file": rx}, week):
         if spec.get("dates"):
             m = re.fullmatch(rx, p.name, re.I)
-            dates = [dt.datetime.strptime(g, "%Y%m%d").date() for g in m.groups()]
+            dates = [dt.datetime.strptime(g, "%Y%m%d").date() for g in m.groups() if g]
             start, end = week_range(week)
             if spec["dates"] == "start_end" and (dates[0], dates[1]) != (start, end):
                 continue
@@ -125,6 +133,23 @@ def also_stock(path):
                          "J": df["EAN"].map(ean)})
 
 
+def also_poco_st(path):
+    """ALSO 的 POCO 表（W45 起）：Sellout 页一行一笔，按 日期 + 产品 + 客户 + EAN 汇总 Quantity。"""
+    df = pd.read_excel(path, sheet_name="Sellout", dtype={"EAN": str})
+    df["EAN"] = df["EAN"].map(ean)
+    df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce").fillna(0)
+    g = df.groupby(["InvoiceDate", "ProductDescription", "CustomerName", "EAN"], dropna=False)["Quantity"].sum().reset_index()
+    return pd.DataFrame({"C": g["ProductDescription"], "I": g["CustomerName"], "J": g["Quantity"].astype(int), "K": None,
+                         "L": g["EAN"], "P": g["InvoiceDate"].map(to_date)})
+
+
+def also_poco_stock(path):
+    df = pd.read_excel(path, sheet_name="Inventory", dtype={"EAN": str})
+    return pd.DataFrame({"C": df["ProductDescription"],
+                         "I": pd.to_numeric(df["StockQuantity"], errors="coerce").fillna(0).astype(int),
+                         "J": df["EAN"].map(ean)})
+
+
 def im_st(path):
     raw = pd.read_excel(path, sheet_name=0, header=None, dtype=object)
     h = next(i for i in range(10) if "ITEMNAME" in [str(x).strip() for x in raw.iloc[i]])  # 有的周第一行是合计
@@ -133,6 +158,90 @@ def im_st(path):
     df = df[df["ITEMNAME"].notna()]
     return pd.DataFrame({"C": df["ITEMNAME"], "I": df["NAME"], "J": pd.to_numeric(df["QTY"]).astype(int), "K": None,
                          "L": df["EAN"].map(ean), "P": df["INVOICEDATE"].map(to_date)})
+
+
+def im_imei(path):
+    """IMEI List：一行一个串号（Q SOLD 多为 1，退货为负），按 型号 + 客户 + EAN + 日期 汇总成和 Mobility 表一样的行。"""
+    df = pd.read_excel(path, sheet_name=0, dtype=object)
+    df = df[df["model"].notna()].copy()
+    for c in ("model", "CUSTOMER NAME"):
+        df[c] = df[c].astype(str).str.split().str.join(" ")  # 原表里有双空格，PSI 里是单空格（工具表2 按单空格查）
+    df["Q SOLD"] = pd.to_numeric(df["Q SOLD"], errors="coerce").fillna(0)
+    df["EAN"] = df["MFR PART"].map(ean)
+    df["DAY"] = df["INVOICE DAY"].map(to_date)
+    g = df.groupby(["model", "CUSTOMER NAME", "EAN", "DAY"], as_index=False, dropna=False)["Q SOLD"].sum()
+    g = g[g["Q SOLD"] != 0]
+    return pd.DataFrame({"C": g["model"], "I": g["CUSTOMER NAME"], "J": g["Q SOLD"].astype(int), "K": None,
+                         "L": g["EAN"], "P": g["DAY"]})
+
+
+def im_crosscheck(inbox, week):
+    """Mobility 和 IMEI List 都在时，按 EAN + 客户比两份的数量；返回不一致的 [dict]，只有一份时返回 None。"""
+    mob, imei = find_files(inbox, "IM_ST", week), find_files(inbox, "IM_IMEI", week)
+    if not (mob and imei):
+        return None
+
+    def by_key(df):
+        return df.assign(I=df["I"].astype(str).str.split().str.join(" "), L=df["L"].astype(str)).groupby(["L", "I"])["J"].sum()
+    a, b = by_key(im_st(mob[0])), by_key(im_imei(imei[0]))
+    j = pd.concat([a.rename("m"), b.rename("i")], axis=1).fillna(0)
+    j = j[j["m"] != j["i"]]
+    raw = pd.read_excel(imei[0], sheet_name=0, dtype=object)
+    raw["EAN"] = raw["MFR PART"].map(ean).astype(str)
+    raw["CUSTOMER NAME"] = raw["CUSTOMER NAME"].astype(str).str.split().str.join(" ")
+    out = []
+    for (l, i), (m, n) in j.iterrows():
+        rows = raw[(raw["EAN"] == l) & (raw["CUSTOMER NAME"] == i)]
+        out.append(dict(ean=l, customer=i, mobility=int(m), imei=int(n),
+                        model=str(rows["model"].iloc[0]).strip() if len(rows) else l,
+                        invoices=sorted(rows["INVOICE NBR"].dropna().astype(str).unique()),
+                        days=sorted({str(to_date(x)) for x in rows["INVOICE DAY"]}),
+                        files=(mob[0].name, imei[0].name)))
+    return out
+
+
+def mark_im_files(inbox, week, diffs, out_dir):
+    """把 Mobility 和 IMEI List 里对不上的行标红，存成副本（原始文件不动），可以直接截图或作为邮件附件。
+    每份副本最前面加一页 Difference，用英文列出差异，方便发给 IM。返回副本路径列表。"""
+    from openpyxl import load_workbook
+    from openpyxl.styles import Font, PatternFill
+    red, bold = PatternFill("solid", fgColor="FFC7CE"), Font(bold=True, color="9C0006")
+    keys = {(d["ean"], d["customer"]) for d in diffs}
+    norm = lambda x: " ".join(str(x).split())
+    out = []
+    for key, ean_col, cust_col in (("IM_ST", "EAN", "NAME"), ("IM_IMEI", "MFR PART", "CUSTOMER NAME")):
+        files = find_files(inbox, key, week)
+        if not files:
+            continue
+        wb = load_workbook(files[0])
+        ws = wb.worksheets[0]
+        head = next(r for r in range(1, 12) if any(str(c.value).strip() == ean_col for c in ws[r]))
+        cols = {str(c.value).strip(): c.column for c in ws[head] if c.value is not None}
+        n = 0
+        for r in range(head + 1, ws.max_row + 1):
+            if (ean(ws.cell(r, cols[ean_col]).value), norm(ws.cell(r, cols[cust_col]).value)) in keys:
+                for c in ws[r]:
+                    c.fill, c.font = red, bold
+                n += 1
+        ws.freeze_panes = ws.cell(head + 1, 1)
+        diff = wb.create_sheet("Difference", 0)
+        diff.append(["Product", "EAN", "Customer", "Invoice", "Invoice date", "Mobility report", "IMEI list", "Difference"])
+        for d in diffs:
+            diff.append([d["model"], d["ean"], d["customer"], ", ".join(d["invoices"]), ", ".join(d["days"]),
+                         d["mobility"], d["imei"], d["imei"] - d["mobility"]])
+        for c in diff[1]:
+            c.font = Font(bold=True)
+        for row in diff.iter_rows(min_row=2):
+            for c in row:
+                c.fill, c.font = red, bold
+        for col, w in zip("ABCDEFGH", (46, 16, 36, 14, 14, 16, 12, 12)):
+            diff.column_dimensions[col].width = w
+        diff.cell(len(diffs) + 3, 1, f"Highlighted rows in sheet '{ws.title}': {n}")
+        wb.active = 0
+        target = Path(out_dir) / f"[Highlighted] {files[0].name}"
+        wb.save(target)
+        out.append(target)
+    return out
 
 
 def im_stock(path):
@@ -169,19 +278,57 @@ def build_db(week, inbox, psi_path):
 
     def add(rows, db, frame):
         frame = frame.copy()
+        # 原表里的名称常有双空格、不间断空格（IM 的 "Euro-net Sp.  z o.o."）；工具表2 按单空格查客户，
+        # 手工粘贴时这些空格会被去掉，这里也统一压成一个空格，否则 PSI 公式查不到客户、OM 的 ST 会漏
+        for col in ("C", "I"):
+            if col in frame and frame[col].dtype == object:
+                frame[col] = frame[col].map(lambda v: " ".join(v.split()) if isinstance(v, str) else v)
         frame.insert(0, "B", db)
         frame.insert(0, "A", week)
         rows.append(frame)
 
     readers = [("AB", "AB_ST", ab_st, st), ("AB", "AB_STOCK", ab_stock, stock),
+               ("AB", "AB_POCO_ST", ab_st, st), ("AB", "AB_POCO_STOCK", ab_stock, stock),
                ("IM", "IM_ST", im_st, st), ("IM", "IM_STOCK", im_stock, stock)]
     for db, key, fn, target in readers:
         files = find_files(inbox, key, week)
+        if not files and key == "IM_ST":
+            files, fn = find_files(inbox, "IM_IMEI", week), im_imei
+        label = f"{db}{' POCO' if 'POCO' in key else ''} {'ST' if target is st else '库存'}"
         if not files:
-            notes.append(f"❌ {db} {'ST' if target is st else '库存'}：没找到当周文件")
+            if "POCO" not in key or week >= POCO_FROM_WEEK:
+                notes.append(f"❌ {label}：没找到当周文件")
             continue
-        notes.append(f"- {db} {'ST' if target is st else '库存'}：`{files[0].name}`")
-        add(target, db, fn(files[0]))
+        notes.append(f"- {label}：`{files[0].name}`")
+        try:
+            frame = fn(files[0])
+            if "POCO" in key and not len(frame):
+                notes.append("  - 这份是空表（只有表头），本周没有数")
+            add(target, db, frame)
+        except (KeyError, ValueError) as e:  # 新表格式和预想的不一样：不算进去，提示人看
+            notes.append(f"  - ⚠️ {files[0].name} 的格式和 AB smart 表不一样（{e}），这份没有算进去，把文件发给工具维护人改读取方式")
+    # IM 同时给了 Mobility 和 IMEI List：以 Mobility 为准（SOP），两份按 EAN + 客户对一下，不一致的列出来去问 IM
+    diffs = im_crosscheck(inbox, week)
+    if diffs is not None and len(diffs):
+        # 2026-11-09 已和 IM 确认：IMEI List 按发货日期、Mobility 按发票日期算周，账期口径不同，差额是时间差；以 Mobility 为准
+        notes.append(f"  - ℹ️ IM 的 Mobility（PSI 用这份）和 IMEI List 有 {len(diffs)} 处不同，属于口径差异"
+                     "（IMEI 按发货日期、Mobility 按发票日期），不用处理："
+                     + "；".join(f"{d['model']} → {d['customer']}：Mobility {d['mobility']} / IMEI {d['imei']}" for d in diffs))
+    elif diffs is not None:
+        notes.append("  - IM 的 Mobility 和 IMEI List 按 EAN + 客户完全一致")
+    files = find_files(inbox, "ALSO_POCO", week)
+    if files:
+        notes.append(f"- ALSO POCO ST + 库存：`{files[0].name}`")
+        try:
+            pst, pstock = also_poco_st(files[0]), also_poco_stock(files[0])
+            if not len(pst) and not len(pstock):
+                notes.append("  - 这份是空表（只有表头），本周 ALSO 的 POCO 没有销量和库存")
+            add(st, "ALSO", pst)
+            add(stock, "ALSO", pstock)
+        except (KeyError, ValueError) as e:
+            notes.append(f"  - ⚠️ {files[0].name} 的格式和预想的不一样（{e}），这份没有算进去")
+    elif week >= POCO_FROM_WEEK:
+        notes.append("❌ ALSO POCO：没找到当周文件")
     files = find_files(inbox, "ALSO", week)
     if files:
         notes.append(f"- ALSO ST + 库存：`{files[0].name}`")

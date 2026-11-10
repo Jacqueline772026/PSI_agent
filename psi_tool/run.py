@@ -12,6 +12,7 @@ from pathlib import Path
 import pandas as pd
 
 from checks.structure_check import COL_C, COL_E, COL_G, COL_LABEL, OTHERS, is_number, load as load_psi
+from checks.identity import OM as OM_SHEETS, OP as OP_SHEETS, DbSt, check as identity_check, report_lines as identity_lines
 from checks.tmo_guard import check_tmo, report_lines
 from psi_tool.db import build_db, compare_db
 from psi_tool.mapping import Mapper, latest_ttl, resolve
@@ -237,7 +238,8 @@ def write_report(path, week, results, tables, comparisons, mapper):
         r = res["rows"]
         unmatched = 0 if r is None else int((r["status"] == "unmatched").sum())
         cmp = comparisons.get(sheet_name)
-        cmp_txt = "—" if not cmp else (f"✅ {cmp[0]} 格一致" if not cmp[1] else f"⚠️ {len(cmp[1])}/{cmp[0]} 格不同")
+        cmp_txt = ("—" if not cmp else "PSI 里这周还没填，没比对" if cmp[0] == 0
+                   else f"✅ {cmp[0]} 格一致" if not cmp[1] else f"⚠️ {len(cmp[1])}/{cmp[0]} 格不同")
         status = "❌ 未收到" if not got else ("⚠️ 缺 " + "、".join(miss) if miss else "✅")
         rows.append([sheet_name, status, "—" if t is None else t["so"].sum(), "—" if t is None else t["stock"].sum(),
                      unmatched, cmp_txt])
@@ -313,14 +315,25 @@ def main():
     st, stock, notes = build_db(a.week, a.inbox, a.psi)
     db_cmp = compare_db(a.psi, a.week, st, stock) if a.compare else None
     write_db_paste(paste, st, stock)
+    # 要找客户 / 同事确认的问题：联系人 + 英文邮件草稿
+    missing = [p.name for res in results.values() for p in res["parts"] if not p.files]
+    from psi_tool.inquiry import write as write_inquiry
+    # IM 的 Mobility 和 IMEI List 不一致是账期口径差异（已确认），不再生成询问邮件；需要时仍可用 db.mark_im_files 标红截图
+    write_inquiry(out / f"W{a.week}_待确认邮件.md", a.week, missing, [])
     text = report.read_text(encoding="utf-8").split("\n")
     at = text.index("## 总览")  # DB 放在 OM/OP 前面
+    # 库存恒等式：上周库存和本周 ST 来自 PSI 导出，本周 SO / 库存用工具结果（粘贴前就能看到）
+    current = {k: {x.code: (x.so, x.stock) for x in t.itertuples()} for k, t in tables.items() if t is not None}
+    db = DbSt(a.psi, {a.week})
+    ident = identity_check({k: results[k]["sheet"] for k in current}, db, a.week, current,
+                           sheets=[k for k in OM_SHEETS + OP_SHEETS if k in current])
+    text += [""] + identity_lines(ident, a.week, db, md_table, "工具结果")
     report.write_text("\n".join(text[:at] + db_report(a.week, st, stock, notes, db_cmp) + text[at:]), encoding="utf-8")
     print(f"待粘贴表：{paste}\n核对报告：{report}")
     for k, (n, d, _) in (db_cmp or {}).items():
         print(f"  {k}: 比对 {n} 组，不一致 {len(d)}")
     for k, (n, d) in comparisons.items():
-        print(f"  {k}: 比对 {n} 格，不一致 {len(d)}")
+        print(f"  {k}: " + ("PSI 里这周还没填，没比对" if n == 0 else f"比对 {n} 格，不一致 {len(d)}"))
 
 
 if __name__ == "__main__":

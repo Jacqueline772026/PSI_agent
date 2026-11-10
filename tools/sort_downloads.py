@@ -33,8 +33,8 @@ from psi_tool.sources import detect_period, find_header, load_config, read_sheet
 EXCEL = (".xlsx", ".xls", ".xlsm")
 # DB 三家的文件规则在 psi_tool/db.py 里是写死的，这里对应一份
 DB_RULES = [
-    ("DB/AB", r"xiaomi_smart_(sell_through_\d{8}_\d{8}|stock_\d{8})\.xlsx"),
-    ("DB/ALSO", r"Xiaomi_Stock_Sellout_\d{8}-\d{8}.*\.xls"),
+    ("DB/AB", r"xiaomi_(smart|poco)_(sell_through_\d{8}_\d{8}|stock_\d{8}).*\.xlsx"),
+    ("DB/ALSO", r"(Xiaomi_Stock_Sellout_\d{8}-\d{8}|ALSO_Reporting_POCO_\d{8}_\d{8}).*\.xlsx?"),
     ("DB/IM", r"(Mobility - Xiaomi -Sales Phones Wk\d+|Internal W\d+ 2026 Ingram SP split|IMEI List Wk\d+).*\.xlsx"),
 ]
 
@@ -71,6 +71,28 @@ def week_from_name(name, folder):
 
 def any_week(rx):
     return rx.replace("{week}", r"\d{1,2}")
+
+
+# 下载后在文件名末尾加的公司标记（如 "——AB"、"_rolv"、"-msh"、" max"），不分大小写，按开头匹配（"GGmedia" → GG）
+TAGS = {
+    "ALSO": "DB/ALSO", "AB": "DB/AB", "IM": "DB/IM", "INGRAM": "DB/IM",
+    "EURO": "OM/EURO", "MEX": "OM/MEX", "TERG": "OM/MEX", "MSH": "OM/MSH", "XKOM": "OM/X-KOM", "X-KOM": "OM/X-KOM",
+    "KTR": "OM/KTR", "MAX": "OM/MAX", "AUCHAN": "OM/Auchan", "GG": "OM/GG", "ROLV": "OM/ROLV",
+    "PLAY": "OP/Play", "TMO": "OP/TMO", "PLUS": "OP/Plus", "ORANGE": "OP/Orange", "JET": "OP/Orange",
+}
+
+
+def tag_folder(name):
+    """文件名最后一个词是公司标记就返回对应文件夹。只看最后一个词，避免把正文里的词当成标记。"""
+    stem = re.sub(r"\.(xlsx|xls|xlsm|msg|zip)$", "", name, flags=re.I)
+    words = [w for w in re.split(r"[\s_.—–-]+", stem) if w]
+    if not words:
+        return None
+    last = words[-1].upper()
+    for tag in sorted(TAGS, key=len, reverse=True):
+        if last == tag or (last.startswith(tag) and not last[len(tag):len(tag) + 1].isdigit()):
+            return TAGS[tag]
+    return None
 
 
 class Classifier:
@@ -136,9 +158,18 @@ class Classifier:
         """返回 (子文件夹, 周, 说明)；认不出来子文件夹为 None。"""
         hits = self.by_name(path.name)
         folder, src = hits[0] if len(hits) == 1 else self.by_content(path, hits)
+        note = []
+        tagged = tag_folder(path.name)
+        if folder is None and tagged:  # 标准文件名和表头都认不出：按下载时加的公司标记归类
+            folder = tagged
+            src = next((s for s, c in self.cfg.items() if c["folder"] == folder), None)
+            note.append("按文件名里的标记归类")
+        elif folder and tagged and tagged != folder and "{michain}" not in folder:
+            note.append(f"⚠️ 文件名标记是 {tagged}，内容像 {folder}，按内容归档")
+        elif folder and "{michain}" in folder and tagged in ("OM/GG", "OM/ROLV"):
+            folder = tagged  # 标记已经说明是 GG 还是 ROLV
         if folder is None:
             return None, None, "文件名和表头都认不出是哪一家"
-        note = []
         if "{michain}" in folder:
             who = self.michain_customer(path)
             if who is None:

@@ -19,6 +19,7 @@
 #   so / stock    销量列 / 库存列（只有其中一个也行），列名里可以写 {week}
 #   include       {column, regex}：只保留匹配的行（品类筛选）
 #   exclude_name  产品名匹配这个正则的行丢掉（手环、手表等）
+#   exclude_key   识别码匹配这个正则的行丢掉（TMO 物料号第 6 位 D/S/R）
 #   week_filter   {column, regex}：文件里有多周数据时只取当周
 #   period        文件时间段：{cell_regex}（前 15 行里找两个日期）、{label_from, label_to}（标签右边的格子）
 #                 或 {column}（日期列）。有 period 的来源，时间段对不上当周的候选文件会被跳过
@@ -182,6 +183,9 @@ TMO:
   # 不能写 bi、cz：TMO 名称会截断，它们是颜色（biały、czarny），已向负责人确认不用管，颜色看 TTL 的 Color 列。
   # 新增名称规则后要看报告里的"TMO 防串检查"
   exclude_name: 'DEMO|SAMPLE|Outlet|reSTART|(?-i:\bCR)\s*$'
+  # 物料号 XA-H-T… 第 6 位：T = 正常新机，D = DEMO / EXPO 展示机，S = SAMPLE，R = Outlet / reSTART。
+  # 名称超过 40 个字符会被截断（"Outl"、"reSTAR"），所以再按物料号排除一次
+  exclude_key: '^XA-[A-Z]-[DSR]'
   so: WydaniaTTL
   stock: ZapasTTL
   others: false

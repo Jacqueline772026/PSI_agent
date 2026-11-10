@@ -26,13 +26,13 @@ python3 -m venv .venv
 
 ## 每周怎么用
 
-完整步骤见 [使用说明.md](使用说明.md)，W44 的试运行清单见 [W44测试/W44测试清单.md](W44测试/W44测试清单.md)。主要四条命令：
+完整步骤见 [使用说明.md](使用说明.md)，W44 的试运行清单见 [W44测试/W44测试清单.md](W44测试/W44测试清单.md)。主要命令：
 
 ```bash
 # 1. 把下载文件夹里的周报按 来源 + 周 整理好
 .venv/bin/python -m tools.sort_downloads ~/Downloads/PSI_W45 --week 45 --dest "W45/W45原始文件"
 
-# 2. 生成待粘贴表和核对报告
+# 2. 生成待粘贴表、核对报告（含库存恒等式）和待确认邮件草稿
 .venv/bin/python -m psi_tool.run --week 45 --inbox "W45/W45原始文件" --out "W45/工具结果"
 
 # 3.（并行手工期间）和自己的 Excel 结果对数
@@ -41,6 +41,12 @@ python3 -m venv .venv
 
 # 4. 检查 PSI 表本身的公式结构
 .venv/bin/python -m checks.structure_check
+
+# 5.（收到新的周报邮件原件后）重新整理各家联系人，只存在本地 数据/联系人.xlsx
+.venv/bin/python -m tools.contacts
+
+# 6. 在上周 PSI 上生成这一周的工具版 PSI + DB 可粘贴表（手工版做完后可逐格对比）
+.venv/bin/python -m tools.update_psi --week 45 --inbox "W45/W45原始文件" --psi 上周PSI.xlsx --out "W45/PSI_W45_工具版.xlsx"
 ```
 
 ## 文件夹

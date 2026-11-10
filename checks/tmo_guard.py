@@ -98,6 +98,8 @@ def report_lines(findings, md_table):
 
 def main():
     """把所有历史 TMO 周报跑一遍，用现在的 mapping 和规则，看每周会报什么。"""
+    import argparse
+    argparse.ArgumentParser(description="TMO 防串检查：对 数据/历史周报 里所有 TMO 周报回测（只读，不改任何文件）").parse_args()
     from pathlib import Path
 
     from psi_tool.mapping import Mapper, latest_ttl
