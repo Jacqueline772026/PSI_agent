@@ -98,8 +98,14 @@ def build(rows):
 
 
 def main():
-    folders = sys.argv[1:] or [HISTORY] + sorted(p for p in ROOT.glob("W*") if p.is_dir())
+    import argparse
+    ap = argparse.ArgumentParser(description="从周报邮件原件整理各家联系人，写到 数据/联系人.xlsx（只在本地）")
+    ap.add_argument("folders", nargs="*", help="要扫描的文件夹；默认 数据/历史周报 和所有 W* 周文件夹")
+    folders = ap.parse_args().folders or [HISTORY] + sorted(p for p in ROOT.glob("W*") if p.is_dir())
     df = build(scan(folders))
+    if df.empty:
+        print("没找到任何周报邮件（.msg），联系人表没有更新")
+        return
     out = DATA / "联系人.xlsx"
     with pd.ExcelWriter(out) as xw:
         df.to_excel(xw, sheet_name="全部", index=False)

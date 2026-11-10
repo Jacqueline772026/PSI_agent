@@ -129,7 +129,10 @@ def jet_models(folder):
 
 
 def main():
-    folder = sys.argv[1] if len(sys.argv) > 1 else str(OPERATORS_HISTORY)
+    import argparse
+    ap = argparse.ArgumentParser(description="从历史运营商周报学 识别码 → 代码，追加进 mapping.xlsx（已有的不覆盖）")
+    ap.add_argument("folder", nargs="?", default=str(OPERATORS_HISTORY), help="默认 数据/历史周报/Operators 运营商")
+    folder = ap.parse_args().folder
     rows, conflicts = learn(folder)
     n = append_mappings(MAPPING, rows, "learned:历史周报 code 列")
     psi = PSI_FILE

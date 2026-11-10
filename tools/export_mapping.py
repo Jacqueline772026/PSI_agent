@@ -223,6 +223,8 @@ def write(pages, path, extra):
 
 
 def main():
+    import argparse
+    argparse.ArgumentParser(description="按 mapping.xlsx 重新导出给 Excel 用的 mapping/PSI码对照表.xlsx").parse_args()
     df, ttl, labels, ev = run_audit(PSI_FILE, MAPPING, audit_weeks())
     pages = build(df, ev)
     pending = df[df["结论"].isin(["冲突", "漏映射", "排除待查", "无法验证"])

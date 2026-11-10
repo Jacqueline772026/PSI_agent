@@ -238,7 +238,8 @@ def write_report(path, week, results, tables, comparisons, mapper):
         r = res["rows"]
         unmatched = 0 if r is None else int((r["status"] == "unmatched").sum())
         cmp = comparisons.get(sheet_name)
-        cmp_txt = "—" if not cmp else (f"✅ {cmp[0]} 格一致" if not cmp[1] else f"⚠️ {len(cmp[1])}/{cmp[0]} 格不同")
+        cmp_txt = ("—" if not cmp else "PSI 里这周还没填，没比对" if cmp[0] == 0
+                   else f"✅ {cmp[0]} 格一致" if not cmp[1] else f"⚠️ {len(cmp[1])}/{cmp[0]} 格不同")
         status = "❌ 未收到" if not got else ("⚠️ 缺 " + "、".join(miss) if miss else "✅")
         rows.append([sheet_name, status, "—" if t is None else t["so"].sum(), "—" if t is None else t["stock"].sum(),
                      unmatched, cmp_txt])
@@ -332,7 +333,7 @@ def main():
     for k, (n, d, _) in (db_cmp or {}).items():
         print(f"  {k}: 比对 {n} 组，不一致 {len(d)}")
     for k, (n, d) in comparisons.items():
-        print(f"  {k}: 比对 {n} 格，不一致 {len(d)}")
+        print(f"  {k}: " + ("PSI 里这周还没填，没比对" if n == 0 else f"比对 {n} 格，不一致 {len(d)}"))
 
 
 if __name__ == "__main__":
