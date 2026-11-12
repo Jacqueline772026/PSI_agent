@@ -287,6 +287,23 @@ def build_db(week, inbox, psi_path):
         frame.insert(0, "A", week)
         rows.append(frame)
 
+    def main_has_poco(rows, db, poco):
+        """POCO 单独发的表：先看这家的主表里有没有 POCO（名称带 POCO，或同一个物料码 / EAN）。
+        有 → 不再合并，免得算两次；没有 → 才把 POCO 表加进去（2026-11-12 胡佳琪确认的规则）。"""
+        main = [f for f in rows if len(f) and f["B"].iat[0] == db]
+        if not main or not len(poco):
+            return False
+        m = pd.concat(main)
+        if m["C"].astype(str).str.contains(r"\bPOCO\b", case=False, regex=True).any():
+            return True
+        for c in (("K", "L") if rows is st else ("J",)):  # ST 的 J 是数量，库存的 J 才是 EAN
+            if c in m and c in poco:
+                a = set(m[c].dropna().astype(str).str.strip()) - {"", "None", "nan"}
+                b = set(poco[c].dropna().astype(str).str.strip()) - {"", "None", "nan"}
+                if a & b:
+                    return True
+        return False
+
     readers = [("AB", "AB_ST", ab_st, st), ("AB", "AB_STOCK", ab_stock, stock),
                ("AB", "AB_POCO_ST", ab_st, st), ("AB", "AB_POCO_STOCK", ab_stock, stock),
                ("IM", "IM_ST", im_st, st), ("IM", "IM_STOCK", im_stock, stock)]
@@ -304,6 +321,9 @@ def build_db(week, inbox, psi_path):
             frame = fn(files[0])
             if "POCO" in key and not len(frame):
                 notes.append("  - 这份是空表（只有表头），本周没有数")
+            if "POCO" in key and main_has_poco(target, db, frame):
+                notes.append("  - 主表里已经有 POCO 型号，这份 POCO 表不再合并（避免算两次）")
+                continue
             add(target, db, frame)
         except (KeyError, ValueError) as e:  # 新表格式和预想的不一样：不算进去，提示人看
             notes.append(f"  - ⚠️ {files[0].name} 的格式和 AB smart 表不一样（{e}），这份没有算进去，把文件发给工具维护人改读取方式")
@@ -316,19 +336,6 @@ def build_db(week, inbox, psi_path):
                      + "；".join(f"{d['model']} → {d['customer']}：Mobility {d['mobility']} / IMEI {d['imei']}" for d in diffs))
     elif diffs is not None:
         notes.append("  - IM 的 Mobility 和 IMEI List 按 EAN + 客户完全一致")
-    files = find_files(inbox, "ALSO_POCO", week)
-    if files:
-        notes.append(f"- ALSO POCO ST + 库存：`{files[0].name}`")
-        try:
-            pst, pstock = also_poco_st(files[0]), also_poco_stock(files[0])
-            if not len(pst) and not len(pstock):
-                notes.append("  - 这份是空表（只有表头），本周 ALSO 的 POCO 没有销量和库存")
-            add(st, "ALSO", pst)
-            add(stock, "ALSO", pstock)
-        except (KeyError, ValueError) as e:
-            notes.append(f"  - ⚠️ {files[0].name} 的格式和预想的不一样（{e}），这份没有算进去")
-    elif week >= POCO_FROM_WEEK:
-        notes.append("❌ ALSO POCO：没找到当周文件")
     files = find_files(inbox, "ALSO", week)
     if files:
         notes.append(f"- ALSO ST + 库存：`{files[0].name}`")
@@ -339,6 +346,22 @@ def build_db(week, inbox, psi_path):
         add(stock, "ALSO", also_stock(files[0]))
     else:
         notes.append("❌ ALSO：没找到当周文件")
+    files = find_files(inbox, "ALSO_POCO", week)  # 放在主表之后：要先知道主表里有没有 POCO
+    if files:
+        notes.append(f"- ALSO POCO ST + 库存：`{files[0].name}`")
+        try:
+            pst, pstock = also_poco_st(files[0]), also_poco_stock(files[0])
+            if not len(pst) and not len(pstock):
+                notes.append("  - 这份是空表（只有表头），本周 ALSO 的 POCO 没有销量和库存")
+            for rows, frame, what in ((st, pst, "ST"), (stock, pstock, "库存")):
+                if main_has_poco(rows, "ALSO", frame):
+                    notes.append(f"  - 主表里已经有 POCO 型号，这份 POCO 表的{what}不再合并（避免算两次）")
+                else:
+                    add(rows, "ALSO", frame)
+        except (KeyError, ValueError) as e:
+            notes.append(f"  - ⚠️ {files[0].name} 的格式和预想的不一样（{e}），这份没有算进去")
+    elif week >= POCO_FROM_WEEK:
+        notes.append("❌ ALSO POCO：没找到当周文件")
 
     st = pd.concat(st, ignore_index=True) if st else pd.DataFrame()
     stock = pd.concat(stock, ignore_index=True) if stock else pd.DataFrame()
