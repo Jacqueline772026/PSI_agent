@@ -65,7 +65,8 @@ MEX:
 MSH:
   folder: OM/MSH
   psi_sheet: MSH
-  file: '.*Raport Xiaomi.*\.xlsx'   # 有 Total sheet、统计日期是当周的才算
+  # 有 Total sheet、统计日期是当周的才算。单独的 "Raport Xiaomi POCO" 不读：MSH 主表 Total 里本来就有 POCO 那一段
+  file: '(?!.*POCO).*Raport Xiaomi.*\.xlsx'
   sheet: any   # W42 及以前叫 Total，W43 起叫 Total_artykuły
   header: ['EAN', 'Grupa towarowa', 'Ilość', 'Stan magazynowy']
   # W43 起的新格式没有 Grupa towarowa 列：没法按品类筛，只留能查到代码的行，再按名称去掉穿戴和配件
