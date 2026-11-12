@@ -163,12 +163,14 @@ def main():
     ap.add_argument("--week", type=int, required=True)
     ap.add_argument("--psi", default=str(PSI_FILE))
     ap.add_argument("--inbox", help="当周原始文件夹：给了就用工具结果覆盖当周（周报收齐的页）")
+    ap.add_argument("--prev-inbox", help="上一周的原始文件夹：给了就用工具结果覆盖上一周（上周 PSI 填错时，比如 W44 的 KTR 填反）")
     ap.add_argument("--first", type=int, default=4, help="趋势从第几周开始（预实页从 W4 开始）")
     ap.add_argument("--out", default=".")
     a = ap.parse_args()
     psi = load(a.psi)
     data, info = collect(psi, range(1, a.week + 1))
     used = override_current(data, a.week, a.inbox, a.psi) if a.inbox else []
+    used_prev = override_current(data, a.week - 1, a.prev_inbox, a.psi) if a.prev_inbox else []
     detail, series = build_tables(data, info, a.week, a.first)
     mdf, mser, mmom, mweeks = monthly(data, info, a.week)
     out = Path(a.out) / f"W{a.week}_SO周报.xlsx"
@@ -181,6 +183,7 @@ def main():
         pd.DataFrame({"说明": [
             f"数据来源：{Path(a.psi).name} 的 OM 各 KA 页（EURO / MEX / X-KOM / MSH / Michain / OM Others）合计，等于 PSI 'OM' 页的 SO。",
             f"W{a.week} 用工具结果覆盖的页：{'、'.join(used) or '无（全部用 PSI 里填的数）'}。",
+            f"W{a.week - 1} 用工具结果覆盖的页：{'、'.join(used_prev) or '无（用 PSI 里填的数）'}。",
             "PSI 里还是公式的格子（没填、显示的是 FCST）按 0 算。",
             "DOS = OM 库存 ÷ 本周 SO × 7。MEX 促销价取 MEX 页 Promo Price 行。",
             "月份：每周按周四所在的月份归月，" + "；".join(f"{m}月 = W{ws[0]}–W{ws[-1]}" for m, ws in mweeks.items()),

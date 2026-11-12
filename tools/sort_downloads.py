@@ -151,7 +151,10 @@ class Classifier:
         if not c.get("period"):
             return None
         h = find_header(raw, [x.replace("{week}", "") for x in c["header"]] if "{week}" not in str(c["header"]) else [])
-        per = detect_period(raw, h, c["period"])
+        try:
+            per = detect_period(raw, h, c["period"])
+        except (KeyError, ValueError, TypeError):  # 人工整理过的表（如汇总表）没有日期列：当成读不出周，不中断整理
+            return None
         return iso_week(per[1]) if per and per[1] else None
 
     def classify(self, path):
