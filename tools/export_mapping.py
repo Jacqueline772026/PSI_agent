@@ -103,7 +103,7 @@ def classify(source, name, code, category, sheet_codes, key=None):
     if category == "exclude":
         return "不计入：非手机 / 翻新 / 样机"
     if category == "others":
-        return "不计入：PSI 没有这个型号这一行（按 Others）"
+        return "Others：PSI 没有这一行的老型号（手机 / 平板）"
     if code is None:
         return "不计入：非手机平板" if NOT_PHONE.search(up) else "⚠️ 没有代码（老型号或新品，请确认）"
     if code not in sheet_codes:
