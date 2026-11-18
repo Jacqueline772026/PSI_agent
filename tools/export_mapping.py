@@ -102,6 +102,8 @@ def classify(source, name, code, category, sheet_codes, key=None):
         return "不计入：门店展示机（E.）"
     if category == "exclude":
         return "不计入：非手机 / 翻新 / 样机"
+    if category == "others":
+        return "不计入：PSI 没有这个型号这一行（按 Others）"
     if code is None:
         return "不计入：非手机平板" if NOT_PHONE.search(up) else "⚠️ 没有代码（老型号或新品，请确认）"
     if code not in sheet_codes:

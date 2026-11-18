@@ -65,7 +65,8 @@ class Mapper:
 
 
 def memory_from_name(name):
-    m = MEMORY.search(str(name))
+    name = re.sub(r"(\d)\s*/\s*1\s*T\s*G?B", r"\1/1024GB", str(name), flags=re.I)  # 16/1TB = 16+1024
+    m = MEMORY.search(name)
     return f"{int(m.group(1))}+{int(m.group(2))}" if m else None
 
 

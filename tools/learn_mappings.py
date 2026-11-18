@@ -69,6 +69,7 @@ DROP = re.compile(r"\b(xiaomi|redmi|ds|dual sim|nfc|wifi|lte|4g|gb|kb|pen|klawia
 def name_key(name):
     """'Redmi Note 15 Pro+ 5G 8/256GB DS' 和 PSI 里的 'RM Note 15 Pro+ 5G' + '8+256' 归一成同一个键。"""
     s = re.sub(r"^e\.", "", str(name).lower()).replace("red.", "redmi ")  # Orange 的 E. 前缀、RED. 缩写
+    s = re.sub(r"(\d)\s*/\s*1\s*t\s*g?b", r"\1/1024gb", s)  # 16/1TB = 16+1024
     m = MEM.search(s)
     mem = f"{int(m.group(1))}+{int(m.group(2))}" if m else None
     s = s[:m.start()] if m else s  # 内存后面是颜色、DS、配件，不参与匹配
