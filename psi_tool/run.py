@@ -44,6 +44,8 @@ def map_rows(df, mapper, sheet_codes, projects):
         code, cat, via = mapper.lookup(r["key_type"], r["key"])
         if cat == "exclude":
             status = "excluded"
+        elif cat == "others":  # PSI 里没有这一行的老型号（手机 / 平板）：公开市场计入 Others，运营商不填
+            code, status = "Others", "others"
         elif code is None:
             status = "excluded" if r.get("drop_unmatched") else "unmatched"
         else:
