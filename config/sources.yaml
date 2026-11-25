@@ -92,6 +92,18 @@ X-KOM:
   stock: FINAL_INVENTORY_QTY
   week_filter: {column: Week, regex: '^2026W0?{week}$'}
 
+# W46 起 X-KOM 的平板单独发一份（手机那份里不再有平板），两份都要算；W45 及以前没有这份是正常的
+XKOM_TAB:
+  folder: OM/X-KOM
+  psi_sheet: X-KOM
+  file: 'Xiaomi_Tab_X-?KOM_W{week}\.xlsx'
+  sheet: Arkusz1
+  header: ['EAN', 'Name', 'SELL_OUT_QTY', 'FINAL_INVENTORY_QTY']
+  key: {type: EAN, column: EAN}
+  name: Name
+  so: SELL_OUT_QTY
+  stock: FINAL_INVENTORY_QTY
+
 KTR:
   folder: OM/KTR
   psi_sheet: OM Others

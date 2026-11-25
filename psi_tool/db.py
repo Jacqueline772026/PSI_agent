@@ -151,8 +151,10 @@ def also_poco_stock(path):
 
 
 def im_st(path):
-    raw = pd.read_excel(path, sheet_name=0, header=None, dtype=object)
-    h = next(i for i in range(10) if "ITEMNAME" in [str(x).strip() for x in raw.iloc[i]])  # 有的周第一行是合计
+    # 按列名找明细页：手工加过透视表的副本，第一张 sheet 会是透视表（列名是 Sum of QTY）；有的周第一行是合计
+    need = {"ITEMNAME", "QTY", "EAN", "INVOICEDATE"}
+    raw, h = next((d, i) for d in pd.read_excel(path, sheet_name=None, header=None, dtype=object).values()
+                  for i in range(min(10, len(d))) if need <= {str(x).strip() for x in d.iloc[i]})
     df = raw.iloc[h + 1:].copy()
     df.columns = [str(x).strip() for x in raw.iloc[h]]
     df = df[df["ITEMNAME"].notna()]
