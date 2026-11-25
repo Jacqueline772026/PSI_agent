@@ -1,4 +1,7 @@
-"""PSI 周度总览看板：从 PSI 导出生成一个本地 HTML 文件，用浏览器打开就能看。
+"""PSI 看板：从 PSI 导出生成一个本地 HTML 文件，用浏览器打开就能看。
+
+六页：周度总览、库存健康、预警清单、新品与退市（关联 数据/参考/Roadmap 里最新的 Roadmap）、预测准确度、数据质量。
+后五页在 tools/dashboard_pages.py。
 
 数据只在本地：HTML 里内嵌了这一周的汇总数，不联网、不上传。发给别人走飞书或公司渠道。
 
@@ -25,6 +28,7 @@ import pandas as pd
 from checks.structure_check import COL_C, COL_E, COL_LABEL, OTHERS, is_number, load
 from psi_tool.paths import OUTPUT, PSI_FILE, ROOT
 from psi_tool.sources import week_range
+from tools import dashboard_pages as pages
 
 OM = ["EURO", "MEX", "MSH", "X-KOM", "Michain", "OM Others"]
 OP = ["Play", "TMO", "Plus", "Orange"]
@@ -168,7 +172,7 @@ def dos_status(dos):
     return "serious" if dos > DOS_HIGH else "critical" if dos < DOS_LOW else "good"
 
 
-def render(m, psi_name):
+def render(m, psi_name, extra):
     start, end = week_range(m["week"])
     esc = html.escape
 
@@ -214,13 +218,15 @@ def render(m, psi_name):
     notes = "".join(f'<li><span class="status {k}"><span aria-hidden="true">{STATUS[k][0]}</span> {STATUS[k][1]}</span> '
                     f'{esc(t)}</li>' for k, t in m["notes"]) or "<li>本周没有需要特别注意的变化。</li>"
     data = json.dumps(dict(weeks=m["weeks"], trend=m["trend"]), ensure_ascii=False)
-    return TEMPLATE.replace("{{TITLE}}", f"PSI 周度总览 W{m['week']}").replace(
+    return TEMPLATE.replace("{{TITLE}}", f"PSI 看板 W{m['week']}").replace(
         "{{WEEK}}", f"2026 W{m['week']}（{start:%m-%d} ~ {end:%m-%d}）").replace(
         "{{SOURCE}}", esc(f"{psi_name}，生成于 {dt.datetime.now():%Y-%m-%d %H:%M}")).replace(
         "{{TILES}}", tiles).replace("{{NOTES}}", notes).replace("{{CHANNELS}}", "".join(ch_rows)).replace(
         "{{SERIES}}", ser_rows).replace("{{UPS}}", mover_rows(m["ups"])).replace(
         "{{DOWNS}}", mover_rows(m["downs"])).replace("{{DATA}}", data).replace(
-        "{{DOS_HIGH}}", str(DOS_HIGH)).replace("{{DOS_LOW}}", str(DOS_LOW))
+        "{{DOS_HIGH}}", str(DOS_HIGH)).replace("{{DOS_LOW}}", str(DOS_LOW)).replace(
+        "{{INVENTORY}}", extra["inventory"]).replace("{{ALERTS}}", extra["alerts"]).replace(
+        "{{ROADMAP}}", extra["roadmap"]).replace("{{FORECAST}}", extra["forecast"]).replace("{{QUALITY}}", extra["quality"])
 
 
 TEMPLATE = r"""<!doctype html>
@@ -263,9 +269,25 @@ padding:6px 10px;font-size:12.5px;box-shadow:0 4px 14px rgba(0,0,0,.12);display:
 .tip b{font-variant-numeric:tabular-nums}.tip i{display:inline-block;width:12px;height:2px;vertical-align:middle;margin-right:6px}
 .foot{color:var(--text-muted);font-size:12px;margin-top:16px}
 details summary{cursor:pointer;color:var(--text-secondary);font-size:12.5px;margin-top:8px}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;margin-top:16px;border-bottom:1px solid var(--border)}
+.tabs a{padding:8px 14px;color:var(--text-secondary);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a[aria-selected="true"]{color:var(--text-primary);border-bottom-color:var(--series-1);font-weight:600}
+section[role=tabpanel]{display:none}section[role=tabpanel].on{display:block}
+.hint{color:var(--text-secondary);font-size:12.5px;margin:-4px 0 12px}.small{font-size:12px;color:var(--text-secondary)}
+.code{color:var(--text-muted);font-size:11.5px}.scroll{overflow-x:auto}td.muted{color:var(--text-muted)}
+.legend-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+table.matrix td.heat{border-radius:6px}table.matrix td small,table.matrix td b+small{display:block;color:var(--text-muted);font-size:11px}
+td.heat.good{background:color-mix(in srgb,var(--good) 16%,transparent)}td.heat.warning{background:color-mix(in srgb,var(--warning) 22%,transparent)}
+td.heat.serious{background:color-mix(in srgb,var(--serious) 24%,transparent)}td.heat.critical{background:color-mix(in srgb,var(--critical) 20%,transparent)}
+td.num.serious{color:#c5552b;font-weight:600}td.heat:focus,td.heat:hover{outline:2px solid var(--text-muted);outline-offset:-2px}
+.status.missing{color:var(--text-muted)}svg.spark{display:block}
 </style></head>
 <body><div class="viz-root"><div class="wrap">
-<header><h1>PSI 周度总览</h1><p>{{WEEK}} · 数据来源：{{SOURCE}}</p></header>
+<header><h1>PSI 看板</h1><p>{{WEEK}} · 数据来源：{{SOURCE}}</p></header>
+<nav class="tabs" role="tablist">
+<a role="tab" href="#overview">周度总览</a><a role="tab" href="#inventory">库存健康</a><a role="tab" href="#alerts">预警清单</a>
+<a role="tab" href="#roadmap">新品与退市</a><a role="tab" href="#forecast">预测准确度</a><a role="tab" href="#quality">数据质量</a></nav>
+<section id="overview" role="tabpanel">
 <div class="tiles">{{TILES}}</div>
 <div class="card"><h2>本周提示</h2><ul class="notes">{{NOTES}}</ul></div>
 <div class="grid2">
@@ -287,6 +309,12 @@ details summary{cursor:pointer;color:var(--text-secondary);font-size:12.5px;marg
  <h2 style="margin-top:16px">本周跌得最多</h2><table><thead><tr><th>机型</th><th>代码</th><th class="num">上周</th>
  <th class="num">本周</th><th class="num">变化</th></tr></thead><tbody>{{DOWNS}}</tbody></table></div>
 </div>
+</section>
+<section id="inventory" role="tabpanel">{{INVENTORY}}</section>
+<section id="alerts" role="tabpanel">{{ALERTS}}</section>
+<section id="roadmap" role="tabpanel">{{ROADMAP}}</section>
+<section id="forecast" role="tabpanel">{{FORECAST}}</section>
+<section id="quality" role="tabpanel">{{QUALITY}}</section>
 <p class="foot">够卖天数 = 本周渠道库存 ÷ 近 4 周平均 SO × 7。超过 {{DOS_HIGH}} 天标"偏高"，低于 {{DOS_LOW}} 天标"风险"（阈值待确认）。
 本周还没填的渠道不计入合计和环比。数值来自 PSI 里手填的格子，公式格（未来周的预测）不算。内含 L3 数据，只在公司渠道内传阅。</p>
 </div></div>
@@ -332,6 +360,14 @@ function line(id, key){
 }
 function draw(){['c-so','c-stock'].forEach(id=>{document.getElementById(id).replaceChildren();document.getElementById('t-'+id.slice(2)).replaceChildren()});
   line('c-so','so'); line('c-stock','stock')}
+// 切换页面：直接响应点击，不依赖网址里的 #（飞书、聊天软件、预览窗口里 # 跳转常被拦掉）
+function show(id){if(!document.getElementById(id))id='overview';
+  document.querySelectorAll('section[role=tabpanel]').forEach(s=>s.classList.toggle('on',s.id===id));
+  document.querySelectorAll('.tabs a').forEach(a=>a.setAttribute('aria-selected',a.getAttribute('href')==='#'+id));
+  try{history.replaceState(null,'','#'+id)}catch(e){}}
+document.querySelectorAll('.tabs a').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();show(a.getAttribute('href').slice(1));scrollTo(0,0)}));
+addEventListener('hashchange',()=>show(location.hash.slice(1)));
+let h0='';try{h0=location.hash.slice(1)}catch(e){} show(h0||'overview');
 draw(); matchMedia('(prefers-color-scheme: dark)').addEventListener('change',draw);
 </script></body></html>
 """
@@ -344,7 +380,7 @@ def latest_week(d):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="生成 PSI 周度总览看板（本地 HTML）")
+    ap = argparse.ArgumentParser(description="生成 PSI 看板（本地 HTML，六页）")
     ap.add_argument("--week", type=int, help="默认：PSI 里一半以上渠道已经填了 SO 的最近一周")
     ap.add_argument("--psi", default=str(PSI_FILE))
     ap.add_argument("--out", help="输出文件夹；默认 W{周}/，没有这个文件夹就放 output/")
@@ -352,10 +388,15 @@ def main():
     d = extract(a.psi)
     week = a.week or latest_week(d)
     m = build(d, db_stock(a.psi), week)
+    rm_path = pages.latest_roadmap()
+    roadmap = pages.parse_roadmap(rm_path, a.psi) if rm_path else []
+    extra = dict(inventory=pages.page_inventory(d, week), alerts=pages.page_alerts(d, week),
+                 roadmap=pages.page_roadmap(d, week, roadmap, rm_path.name if rm_path else ""),
+                 forecast=pages.page_forecast(d, week), quality=pages.page_quality(d, week))
     out = Path(a.out) if a.out else (ROOT / f"W{week}" if (ROOT / f"W{week}").is_dir() else OUTPUT)
     out.mkdir(parents=True, exist_ok=True)
-    path = out / f"W{week}_周度总览.html"
-    path.write_text(render(m, Path(a.psi).name), encoding="utf-8")
+    path = out / f"W{week}_PSI看板.html"
+    path.write_text(render(m, Path(a.psi).name, extra), encoding="utf-8")
     print(path)
 
 
