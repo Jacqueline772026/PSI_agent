@@ -39,9 +39,18 @@ def psi_layout(sheet):
 
 
 def map_rows(df, mapper, sheet_codes, projects):
-    out = []
+    out, cross = [], []
     for _, r in df.iterrows():
         code, cat, via = mapper.lookup(r["key_type"], r["key"])
+        # 有备用识别码的来源（Orange：BSCS 码、名称）：每种识别码各自独立查一遍，结果分开记，互相核对，不互相覆盖。
+        # 填进 PSI 的代码按顺序取第一个查到的（物料号 → BSCS → 名称）
+        looks = {r["key_type"]: (r["key"], code, cat)}
+        for kt, k in (r.get("backup_keys") or []):
+            c2, cat2, via2 = mapper.lookup(kt, k) if k else (None, None, None)
+            looks[kt] = (k, c2, cat2)
+            if code is None and cat is None and (c2 is not None or cat2 is not None):
+                code, cat, via = c2, cat2, f"{via2}（按 {kt}）"
+        cross.append(looks if len(looks) > 1 else None)
         if cat == "exclude":
             status = "excluded"
         elif cat == "others":  # PSI 里没有这一行的老型号（手机 / 平板）：公开市场计入 Others，运营商不填
@@ -54,7 +63,37 @@ def map_rows(df, mapper, sheet_codes, projects):
         out.append((code, via, status))
     df = df.copy()
     df[["psi_code", "via", "status"]] = pd.DataFrame(out, index=df.index)
+    df["cross"] = cross
     return df
+
+
+def cross_check_lines(rows):
+    """几种识别码各自查出的结果对比：全部一致 / 有的没登记 / 互相矛盾。"""
+    if "cross" not in rows or rows["cross"].isna().all():
+        return []
+    label = lambda c, cat: (c or "") if cat not in ("exclude", "others") else f"（{cat}）"
+    same, missing, conflict = 0, [], []
+    for (_, r), looks in zip(rows.iterrows(), rows["cross"]):
+        if not looks:
+            continue
+        got = {kt: label(c, cat) for kt, (k, c, cat) in looks.items() if c is not None or cat is not None}
+        absent = [f"{kt} `{k}`" for kt, (k, c, cat) in looks.items() if c is None and cat is None and k]
+        if len(set(got.values())) > 1:
+            conflict.append([r["name"][:45], "；".join(f"{kt} → {v}" for kt, v in got.items()), int(r["so"]), int(r["stock"])])
+        elif absent:
+            missing.append([r["name"][:45], "、".join(absent), next(iter(got.values()), "—"), int(r["so"]), int(r["stock"])])
+        else:
+            same += 1
+    L = ["", f"**识别码互相核对**（物料号、BSCS 码、名称各自独立查，不互相替代）：{same} 行三种结果一致"]
+    if conflict:
+        L += ["", "❌ 几种查法结果**不一样**（要人工判断哪个对，改 mapping）", "",
+              md_table(["产品名", "各自查到", "SO", "库存"], conflict)]
+    if missing:
+        L += ["", "⚠️ 有的识别码 mapping 里还没登记（结果靠其他识别码，建议补上）", "",
+              md_table(["产品名", "没登记的", "其他识别码查到", "SO", "库存"], missing)]
+    if not conflict and not missing:
+        L[-1] += "，没有矛盾，也没有漏登记 ✅"
+    return L
 
 
 def build(week, inbox, psi_path, config_path, mapping_path, ttl_root):
@@ -283,6 +322,7 @@ def write_report(path, week, results, tables, comparisons, mapper):
         if len(oth):
             L += ["", "**有代码但 PSI 这张 sheet 没有对应行**（老品正常；新品要考虑加行）", "",
                   md_table(["代码", "SO", "库存"], [[c, int(a), int(b)] for c, a, b in oth.values])]
+        L += cross_check_lines(r)
         if sheet_name == "TMO":
             excluded = [p.name_excluded for p in res["parts"] if p.name_excluded is not None]
             L += report_lines(check_tmo(r, pd.concat(excluded) if excluded else None), md_table)
