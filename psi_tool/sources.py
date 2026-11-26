@@ -1,6 +1,6 @@
 """按 config/sources.yaml 找到当周的原始文件，读成统一格式的明细表。
 
-统一格式的列：source, psi_sheet, file, key_type, key, name, so, stock
+统一格式的列：source, psi_sheet, file, key_type, key, backup_keys, name, so, stock
 """
 import datetime as dt
 import io
@@ -308,8 +308,19 @@ def load_source(root, name, cfg, week):
             c_fb = column(raw, h, cfg["key"]["fallback"])
             keys = [k or normalize_key(x, cfg["key"]["type"], cfg.get("ean_add_6"))
                     for k, x in zip(keys, body.iloc[:, c_fb])]
+        # also：主识别码在 mapping 里查不到时，按顺序再用这几列查（Orange = 物料号 → BSCS 码 → 名称）
+        also = cfg["key"].get("also") or []
+        also = [also] if isinstance(also, dict) else also
+        backups = []
+        for a in also:
+            try:
+                c_b = column(raw, h, a["column"])
+            except KeyError:  # 备用列缺了不影响读取，只是少一种查法
+                continue
+            backups.append([(a["type"], normalize_key(x, a["type"])) for x in body.iloc[:, c_b]])
         df = pd.DataFrame({
             "key": keys,
+            "backup_keys": [list(t) for t in zip(*backups)] if backups else [[] for _ in keys],
             # pandas 3 的 astype(str) 会保留空值，统一成空字符串，否则没有名称的汇总行（如占比合计）会被当成产品
             "name": body.iloc[:, c_name].astype(str).str.strip().fillna(""),
             "so": to_number(body.iloc[:, c_so]) if c_so is not None else 0,

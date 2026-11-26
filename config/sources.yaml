@@ -12,7 +12,8 @@
 #   key           {type, column}：type 决定去哪查 PSI 代码
 #                   EAN          69 码 → TTL ID 表 + mapping.xlsx
 #                   TTL_ID       TTL ID 表的 ID 列（Michain 的 Product ID）
-#                   PLAY_SKU / TMO_MATERIAL / PLUS_NAME / ORANGE_NAME → 只查 mapping.xlsx
+#                   PLAY_SKU / TMO_MATERIAL / PLUS_NAME / ORANGE_MATERIAL / ORANGE_BSCS / ORANGE_NAME → 只查 mapping.xlsx
+#                 also：[{type, column}, ...]，主识别码在 mapping 里查不到时按顺序再用这几列查（Orange：物料号 → BSCS → 名称）
 #                 fallback：主列查不到（比如 Michain 的 Product ID 写着 Nieznany）时改用这一列
 #   ean_add_6     true = EAN 不以 6 开头就在前面补 6（KTR）
 #   name          产品名列（报告里给人看）
@@ -222,7 +223,9 @@ ORANGE:
   file: '.*Zapas_oraz_dystrybucja_XIAOMI_W{week}(?![0-9]).*\.xlsx'
   sheet: 0
   header: ['Materiał', 'Nazwa materiału', 'Zapas_CWH', 'Zapas_POS']
-  key: {type: ORANGE_NAME, column: 'Nazwa materiału'}
+  # 先按物料号（Materiał）查 mapping；物料号还没登记的新货，再按 BSCS 码（型号+内存，不分颜色），最后按名称（2026-11-26 起）
+  key: {type: ORANGE_MATERIAL, column: 'Materiał',
+        also: [{type: ORANGE_BSCS, column: 'Kod BSCS materiału'}, {type: ORANGE_NAME, column: 'Nazwa materiału'}]}
   name: 'Nazwa materiału'
   exclude_name: '^E\.|^SŁUCH'   # E. 开头 = 门店展示机，不计入（2026-11-02 已确认）；SŁUCH = 耳机
   # 库存 = 中央仓 + 门店 + B2B（和 PSI W39–W41 已核对一致）。
