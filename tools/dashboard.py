@@ -26,7 +26,7 @@ import openpyxl
 import pandas as pd
 
 from checks.structure_check import COL_C, COL_E, COL_LABEL, OTHERS, is_number, load
-from psi_tool.paths import OUTPUT, PSI_FILE, ROOT
+from psi_tool.paths import PSI_FILE, ROOT
 from psi_tool.sources import week_range
 from tools import dashboard_pages as pages
 
@@ -383,7 +383,7 @@ def main():
     ap = argparse.ArgumentParser(description="生成 PSI 看板（本地 HTML，六页）")
     ap.add_argument("--week", type=int, help="默认：PSI 里一半以上渠道已经填了 SO 的最近一周")
     ap.add_argument("--psi", default=str(PSI_FILE))
-    ap.add_argument("--out", help="输出文件夹；默认 W{周}/，没有这个文件夹就放 output/")
+    ap.add_argument("--out", help="输出文件夹；默认 W{周}/（没有就新建）")
     a = ap.parse_args()
     d = extract(a.psi)
     week = a.week or latest_week(d)
@@ -393,7 +393,7 @@ def main():
     extra = dict(inventory=pages.page_inventory(d, week), alerts=pages.page_alerts(d, week),
                  roadmap=pages.page_roadmap(d, week, roadmap, rm_path.name if rm_path else ""),
                  forecast=pages.page_forecast(d, week), quality=pages.page_quality(d, week))
-    out = Path(a.out) if a.out else (ROOT / f"W{week}" if (ROOT / f"W{week}").is_dir() else OUTPUT)
+    out = Path(a.out) if a.out else ROOT / f"W{week}"
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"W{week}_PSI看板.html"
     path.write_text(render(m, Path(a.psi).name, extra), encoding="utf-8")

@@ -4,7 +4,20 @@ PSI_xiaomi：小米波兰 GTM 的 PSI 周更工具。它把经销商（AB / ALSO
 
 > ⚠️ 这个仓库**只放代码、配置和说明**。PSI 表、TTL ID 表、客户周报都是公司 L3 机密，已在 `.gitignore` 里排除，不要手动加进来。
 
-## 第一次在一台电脑上使用
+## 第一次在一台电脑上使用（一键安装）
+
+1. 拿到代码：GitHub 仓库页面 → 绿色 **Code** → **Download ZIP**，解压到桌面；或者用 GitHub Desktop clone。
+2. 双击安装：
+   - Windows：`一键安装_Windows.bat`
+   - Mac：`一键安装_Mac.command`（第一次提示"无法打开"就右键 → 打开）
+
+   它会自己找 Python（Windows 上找不到会用 winget 装 Python 3.13，只装给当前用户），建 `.venv`、装依赖、建 `数据` 文件夹。重复双击没关系。
+3. 从飞书导出 PSI 表，改名为 `Poland PSI DB+Channel.xlsx`，放进 `数据` 文件夹。
+4. 出看板：双击 `生成看板_Windows.bat` / `生成看板_Mac.command`，输入周数（直接回车 = 最近填好的一周），生成后自动打开 `W{周}/W{周}_PSI看板.html`。
+
+装不上时把窗口截图发给负责人。公司电脑禁止 winget 的话，按窗口提示从 python.org 装 Python（勾选 "Add python.exe to PATH"），再双击一次安装。
+
+### 手动安装（开发用）
 
 ```bash
 git clone https://github.com/Jacqueline772026/PSI_agent.git
