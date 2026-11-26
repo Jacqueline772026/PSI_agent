@@ -47,6 +47,9 @@ python3 -m venv .venv
 
 # 6. 在上周 PSI 上生成这一周的工具版 PSI + DB 可粘贴表（手工版做完后可逐格对比）
 .venv/bin/python -m tools.update_psi --week 45 --inbox "W45/W45原始文件" --psi 上周PSI.xlsx --out "W45/PSI_W45_工具版.xlsx"
+
+# 7. PSI 填完后生成看板（总览 / 库存 / 预警 / Roadmap / 预测 / 数据质量），输出 W45/W45_PSI看板.html
+.venv/bin/python -m tools.dashboard --week 45
 ```
 
 ## 文件夹
@@ -58,7 +61,7 @@ PSI_agent/
 ├── config/sources.yaml     每家周报怎么读：文件名、表头、用哪几列、怎么筛选（客户改格式时改这里）
 ├── mapping/mapping.xlsx    人工确认过的 识别码 → PSI 代码（新品在这里补）
 ├── checks/                 PSI 表结构校验（公式漏行、重复代码、小计区间）
-├── tools/                  整理下载文件夹、和 Excel 对数、从历史周报学映射、导出和核对对照表
+├── tools/                  整理下载文件夹、和 Excel 对数、从历史周报学映射、导出和核对对照表、PSI 看板
 ├── notebooks/              Jupyter 调试本：单独调试某一家
 ├── docs/各家周报列说明.md    每家每列是什么、PSI 用哪一列、历史上发现的错误
 ├── docs/易错清单.md          填 PSI 前过一遍；对照表和源表的错误
